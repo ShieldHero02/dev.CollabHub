@@ -1,0 +1,257 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+.sidebar {
+  border-right: 1px solid var(--color-border);
+  background: #0c121a;
+  padding: var(--space-5);
+}
+
+.brand {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-6);
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #8c7cff, #4fb3ff);
+  color: #07101a;
+  font-weight: 800;
+}
+
+.brand small,
+.workspace p,
+.legend {
+  color: var(--color-muted);
+}
+
+.main-nav {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.main-nav a {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted);
+}
+
+.main-nav a.active,
+.main-nav a:hover {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.workspace {
+  padding: var(--space-6);
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+}
+
+.hero-panel,
+.surface {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.hero-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: var(--space-5);
+  padding: var(--space-5);
+}
+
+.hero-panel h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 48px);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-2);
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.status-card {
+  display: grid;
+  align-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+
+.status-card span {
+  color: var(--color-muted);
+}
+
+.status-card strong {
+  font-size: 28px;
+}
+
+.surface {
+  overflow: hidden;
+}
+
+.surface-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.surface-head h2 {
+  margin: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--color-unknown);
+}
+
+.key.many-free,
+.slot.many-free {
+  background: var(--color-free-strong);
+}
+
+.key.some-free,
+.slot.some-free {
+  background: var(--color-free);
+}
+
+.key.maybe,
+.slot.maybe {
+  background: var(--color-maybe);
+}
+
+.key.busy,
+.slot.busy {
+  background: var(--color-busy);
+}
+
+.slot.unknown {
+  background: var(--color-unknown);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: 72px repeat(7, minmax(72px, 1fr));
+  overflow: auto;
+}
+
+.cell {
+  min-height: 42px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--color-border), transparent 20%);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border), transparent 20%);
+}
+
+.cell.head,
+.cell.time {
+  display: grid;
+  place-items: center;
+  background: #141e2a;
+  color: var(--color-muted);
+  font-weight: 700;
+}
+
+.cell.slot {
+  cursor: pointer;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: var(--space-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .brand {
+    margin-bottom: var(--space-3);
+  }
+
+  .main-nav {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .main-nav a {
+    white-space: nowrap;
+  }
+
+  .workspace {
+    padding: var(--space-4);
+  }
+
+  .hero-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .surface-head {
+    display: grid;
+  }
+}
+

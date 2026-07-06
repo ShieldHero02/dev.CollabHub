@@ -1,0 +1,25 @@
+{
+  "name": "collabhub",
+  "version": "2.0.0-alpha.0",
+  "private": true,
+  "description": "CollabHub v2 monorepo: community availability platform.",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @collabhub/api --filter @collabhub/web dev",
+    "dev:api": "pnpm --filter @collabhub/api dev",
+    "dev:web": "pnpm --filter @collabhub/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "^6.1.0",
+    "typescript": "^5.7.2"
+  }
+}

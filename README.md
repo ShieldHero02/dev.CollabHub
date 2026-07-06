@@ -4,6 +4,19 @@ CollabHub is a static local-first web app for quickly understanding who is free,
 
 The project is intentionally not a corporate calendar, task manager, Trello clone, or CRM. The first screen must answer one question fast: who can be invited right now or for a nearby time slot?
 
+## v2 direction
+
+The `dev` branch is moving CollabHub toward a database-backed platform:
+
+- `apps/api` - Node.js + TypeScript + Fastify API
+- `apps/web` - React + TypeScript frontend
+- `packages/domain` - pure business rules
+- `packages/shared-types` - shared API types
+- `prisma` - PostgreSQL schema and migrations
+- `docs/v2-*.md` - architecture, data model, roadmap, and local setup
+
+The legacy static app remains in the repository while v2 is being built. JSON/localStorage are not live storage for v2; legacy JSON is only an import source.
+
 ## What is included
 
 - week availability heatmap
@@ -23,17 +36,21 @@ Open `login.html` or `index.html` in a browser.
 
 On the first launch there are no users. The login page creates the first master account.
 
-## Deploy to GitHub Pages
+## Deploy legacy static site to GitHub Pages
 
 1. Create a new repository on GitHub.
 2. Upload all project files to the repository root.
 3. Push to the `main` branch.
 4. Open repository settings.
 5. Go to **Pages**.
-6. Select **GitHub Actions** as the source.
-7. The included workflow `.github/workflows/pages.yml` will publish the static site.
+6. Select **Deploy from a branch**.
+7. Select the publishing branch and `/root`.
 
 No build step is required.
+
+## Run v2 locally
+
+See [docs/v2-local-development.md](docs/v2-local-development.md).
 
 ## Deploy to Netlify or Vercel
 

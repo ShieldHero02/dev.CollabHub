@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: collabhub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: collabhub
+      POSTGRES_PASSWORD: collabhub
+      POSTGRES_DB: collabhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - collabhub-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U collabhub -d collabhub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  collabhub-postgres:
+
