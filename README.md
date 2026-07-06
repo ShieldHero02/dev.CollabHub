@@ -56,3 +56,5 @@ Before real production use, move authentication, accounts, permissions, password
 User data is intentionally stored under a stable key, `collabhub.userData`, instead of a release-specific project key. Older data from `collabhub.expandable.v3` is migrated automatically.
 
 The app also mirrors the same state into browser IndexedDB database `collabhub-user-data`. This keeps user data separate from project files and makes future UI/code changes safer. Future schema changes should be added as migrations in `assets/app-data.js` without changing the stable storage key.
+
+The dev deployment can bootstrap initial data from `data/dev-seed.json` on `dev.collabhub.rogaxiom.com`. This seed is used only when the browser has no existing CollabHub local data yet; it will not overwrite a user's current local database.

@@ -7,6 +7,7 @@
   CH.dbName = "collabhub-user-data";
   CH.dbStore = "records";
   CH.dbRecordKey = "state";
+  CH.bootstrapDataUrl = "data/dev-seed.json";
   CH.sessionKey = "collabhub.session.v1";
   CH.days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   CH.statuses = {
@@ -212,6 +213,10 @@
     return null;
   };
 
+  CH.canUseBootstrapData = function () {
+    return ["dev.collabhub.rogaxiom.com", "localhost", "127.0.0.1", ""].includes(location.hostname);
+  };
+
   CH.persist = function (options) {
     CH.state.schemaVersion = CH.dataVersion;
     CH.state.meta = {
@@ -226,12 +231,15 @@
 
   CH.load = function () {
     try {
-      CH.state = CH.readLocalState() || CH.demo();
+      const stored = CH.readLocalState();
+      CH.loadedFromUserData = Boolean(stored);
+      CH.state = stored || CH.demo();
     } catch (error) {
+      CH.loadedFromUserData = false;
       CH.state = CH.demo();
     }
     CH.normalize();
-    CH.persist();
+    if (CH.loadedFromUserData) CH.persist();
     return CH.state;
   };
 
@@ -290,13 +298,36 @@
   };
 
   CH.restoreFromUserDb = async function () {
-    if (localStorage.getItem(CH.storageKey)) return;
+    if (CH.loadedFromUserData) return false;
     const restored = await CH.readUserDb();
-    if (!restored) return;
+    if (!restored) return false;
     CH.state = restored;
     CH.normalize();
     CH.persist();
     location.reload();
+    return true;
+  };
+
+  CH.restoreFromBootstrap = async function () {
+    if (CH.loadedFromUserData || !CH.canUseBootstrapData()) return false;
+    try {
+      const response = await fetch(CH.bootstrapDataUrl, { cache: "no-store" });
+      if (!response.ok) return false;
+      const restored = await response.json();
+      if (!restored.participants || !restored.schedules || !restored.accounts) return false;
+      CH.state = restored;
+      CH.normalize();
+      CH.persist();
+      location.reload();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  CH.restoreSeedData = async function () {
+    if (await CH.restoreFromUserDb()) return;
+    await CH.restoreFromBootstrap();
   };
 
   CH.currentUser = function () {
@@ -478,5 +509,5 @@
   };
 
   CH.load();
-  CH.restoreFromUserDb();
+  CH.restoreSeedData();
 })();
