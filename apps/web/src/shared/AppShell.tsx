@@ -1,28 +1,52 @@
 import type { PropsWithChildren } from "react";
+import type { CurrentUserDto } from "@collabhub/shared-types";
 
-const navItems = ["Общее", "Участники", "Ивенты", "Кабинет", "Админ"];
+export type AppView = "overview" | "participants" | "member";
 
-export function AppShell({ children }: PropsWithChildren) {
+const navItems: Array<{ key: AppView; label: string }> = [
+  { key: "overview", label: "Общее" },
+  { key: "participants", label: "Участники" }
+];
+
+type AppShellProps = PropsWithChildren<{
+  activeView: AppView;
+  currentUser: CurrentUserDto | null;
+  onNavigate: (view: AppView) => void;
+  onLogout: () => void;
+}>;
+
+export function AppShell({ activeView, children, currentUser, onLogout, onNavigate }: AppShellProps) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="/">
+        <button className="brand" onClick={() => onNavigate("overview")} type="button">
           <span className="brand-mark">CH</span>
           <span>
             <b>CollabHub</b>
-            <small>v2 platform</small>
+            <small>v2 dev</small>
           </span>
-        </a>
+        </button>
         <nav className="main-nav" aria-label="Основная навигация">
-          {navItems.map((item, index) => (
-            <a className={index === 0 ? "active" : ""} href="/" key={item}>
-              {item}
-            </a>
+          {navItems.map((item) => (
+            <button
+              className={activeView === item.key ? "active" : ""}
+              key={item.key}
+              onClick={() => onNavigate(item.key)}
+              type="button"
+            >
+              {item.label}
+            </button>
           ))}
         </nav>
+        <div className="account-chip">
+          <span>{currentUser?.login ?? "нет сессии"}</span>
+          <small>{currentUser?.role ?? "guest"}</small>
+        </div>
+        <button className="ghost-button sidebar-action" onClick={onLogout} type="button">
+          Выйти
+        </button>
       </aside>
       <main className="workspace">{children}</main>
     </div>
   );
 }
-
