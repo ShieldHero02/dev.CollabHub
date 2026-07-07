@@ -30,6 +30,38 @@ export type ParticipantDto = {
   interests: string[];
 };
 
+export type AvailabilityStatusDto =
+  | "free"
+  | "busy"
+  | "maybe"
+  | "stream"
+  | "work"
+  | "study"
+  | "unknown";
+
+export type AvailabilityCellDto = {
+  profileId: string;
+  date: string;
+  hour: number;
+  status: AvailabilityStatusDto;
+  comment: string;
+};
+
+export type AvailabilityWeekDto = {
+  startDate: string;
+  endDate: string;
+  cells: AvailabilityCellDto[];
+};
+
+export type SaveAvailabilityWeekDto = {
+  cells: Array<{
+    date: string;
+    hour: number;
+    status: AvailabilityStatusDto;
+    comment?: string;
+  }>;
+};
+
 export type UserDto = {
   id: string;
   login: string;

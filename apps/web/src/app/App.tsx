@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CurrentUserDto, ParticipantDto } from "@collabhub/shared-types";
+import type {
+  AvailabilityCellDto,
+  AvailabilityStatusDto,
+  CurrentUserDto,
+  ParticipantDto
+} from "@collabhub/shared-types";
 import { AppShell, type AppView } from "../shared/AppShell.js";
 import { ApiClient, apiBaseUrl } from "../shared/api.js";
 
 const tokenStorageKey = "collabhub.v2.token";
 const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const statuses: AvailabilityStatusDto[] = ["unknown", "free", "maybe", "busy", "stream", "work", "study"];
+const statusLabels: Record<AvailabilityStatusDto, string> = {
+  free: "Свободен",
+  busy: "Занят",
+  maybe: "Возможно",
+  stream: "Стрим",
+  work: "Работа",
+  study: "Учеба",
+  unknown: "Нет данных"
+};
 const hours = Array.from({ length: 24 }, (_, hour) => `${hour.toString().padStart(2, "0")}:00`);
 
 export function App() {
@@ -20,11 +35,8 @@ export function App() {
   const api = useMemo(() => new ApiClient(token), [token]);
 
   const setToken = useCallback((nextToken: string | null) => {
-    if (nextToken) {
-      localStorage.setItem(tokenStorageKey, nextToken);
-    } else {
-      localStorage.removeItem(tokenStorageKey);
-    }
+    if (nextToken) localStorage.setItem(tokenStorageKey, nextToken);
+    else localStorage.removeItem(tokenStorageKey);
     setTokenState(nextToken);
   }, []);
 
@@ -57,14 +69,6 @@ export function App() {
       .finally(() => setIsBooting(false));
   }, [loadSession]);
 
-  useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
-
-    void loadParticipants().catch((unknownError) => setError(readError(unknownError)));
-  }, [currentUser, loadParticipants]);
-
   const selectedParticipant =
     participants.find((participant) => participant.id === selectedParticipantId) ?? participants[0] ?? null;
 
@@ -79,6 +83,7 @@ export function App() {
       : await api.login({ login: payload.login, password: payload.password });
     setToken(response.token);
     setCurrentUser(response.user);
+    await loadParticipants();
   }
 
   async function handleLogout() {
@@ -90,9 +95,7 @@ export function App() {
     setActiveView("overview");
   }
 
-  if (isBooting) {
-    return <SplashScreen />;
-  }
+  if (isBooting) return <SplashScreen />;
 
   if (!currentUser) {
     return (
@@ -114,6 +117,7 @@ export function App() {
       {error ? <div className="notice danger">{error}</div> : null}
       {activeView === "overview" ? (
         <OverviewScreen
+          api={api}
           currentUser={currentUser}
           onOpenParticipant={(participantId) => {
             setSelectedParticipantId(participantId);
@@ -132,7 +136,7 @@ export function App() {
         />
       ) : null}
       {activeView === "member" && selectedParticipant ? (
-        <ParticipantTableScreen participant={selectedParticipant} />
+        <ParticipantTableScreen api={api} currentUser={currentUser} participant={selectedParticipant} />
       ) : null}
     </AppShell>
   );
@@ -216,19 +220,33 @@ function AuthScreen({ error, mode, onSubmit }: AuthScreenProps) {
   );
 }
 
-type OverviewScreenProps = {
+function OverviewScreen({
+  api,
+  currentUser,
+  onOpenParticipant,
+  participants
+}: {
+  api: ApiClient;
   currentUser: CurrentUserDto;
   onOpenParticipant: (participantId: string) => void;
   participants: ParticipantDto[];
-};
+}) {
+  const [cells, setCells] = useState<AvailabilityCellDto[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-function OverviewScreen({ currentUser, onOpenParticipant, participants }: OverviewScreenProps) {
+  useEffect(() => {
+    setIsLoading(true);
+    void api.availabilityWeek(startOfCurrentWeek())
+      .then((week) => setCells(week.cells))
+      .finally(() => setIsLoading(false));
+  }, [api]);
+
   return (
     <>
       <header className="page-head">
         <div>
           <h1>Общее</h1>
-          <p>Первый API-экран v2: авторизация, роли и участники уже приходят с backend.</p>
+          <p>Сводка строится из backend и базы данных. Локальный браузер больше не источник правды.</p>
         </div>
       </header>
       <section className="metrics-grid">
@@ -240,17 +258,17 @@ function OverviewScreen({ currentUser, onOpenParticipant, participants }: Overvi
         <header className="surface-head">
           <div>
             <h2>Карта недели</h2>
-            <p>Сейчас это нейтральная сетка. Следующий API-слой подключит реальные слоты и комментарии.</p>
+            <p>{isLoading ? "Загружаем расписание..." : "Агрегированная доступность по всем видимым участникам."}</p>
           </div>
           <Legend />
         </header>
-        <AvailabilityGrid />
+        <AvailabilityGrid cells={aggregateCells(cells, participants.length)} />
       </section>
       <section className="surface">
         <header className="surface-head">
           <div>
             <h2>Участники</h2>
-            <p>Открывайте личную таблицу участника для просмотра.</p>
+            <p>Откройте личную таблицу участника для просмотра или редактирования по правам.</p>
           </div>
         </header>
         <ParticipantList onOpenParticipant={onOpenParticipant} participants={participants} />
@@ -271,7 +289,7 @@ function ParticipantsScreen({
       <header className="page-head">
         <div>
           <h1>Участники</h1>
-          <p>Список профилей из базы данных v2.</p>
+          <p>Профили из базы данных v2.</p>
         </div>
       </header>
       <ParticipantList onOpenParticipant={onOpenParticipant} participants={participants} />
@@ -286,9 +304,7 @@ function ParticipantList({
   onOpenParticipant: (participantId: string) => void;
   participants: ParticipantDto[];
 }) {
-  if (participants.length === 0) {
-    return <div className="empty-state">Пока нет участников.</div>;
-  }
+  if (participants.length === 0) return <div className="empty-state">Пока нет участников.</div>;
 
   return (
     <div className="participant-grid">
@@ -308,7 +324,66 @@ function ParticipantList({
   );
 }
 
-function ParticipantTableScreen({ participant }: { participant: ParticipantDto }) {
+function ParticipantTableScreen({
+  api,
+  currentUser,
+  participant
+}: {
+  api: ApiClient;
+  currentUser: CurrentUserDto;
+  participant: ParticipantDto;
+}) {
+  const [cells, setCells] = useState<AvailabilityCellDto[]>([]);
+  const [dirtyCells, setDirtyCells] = useState<Map<string, AvailabilityCellDto>>(new Map());
+  const [selectedCell, setSelectedCell] = useState<AvailabilityCellDto | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canEdit =
+    currentUser.profileId === participant.id ||
+    currentUser.permissions.includes("schedule:edit:all");
+
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    setDirtyCells(new Map());
+    setSelectedCell(null);
+    void api.availabilityWeek(startOfCurrentWeek(), participant.id)
+      .then((week) => setCells(week.cells))
+      .catch((unknownError) => setError(readError(unknownError)))
+      .finally(() => setIsLoading(false));
+  }, [api, participant.id]);
+
+  function updateCell(nextCell: AvailabilityCellDto) {
+    setCells((current) => current.map((cell) => cellKey(cell) === cellKey(nextCell) ? nextCell : cell));
+    setSelectedCell(nextCell);
+    setDirtyCells((current) => {
+      const next = new Map(current);
+      next.set(cellKey(nextCell), nextCell);
+      return next;
+    });
+  }
+
+  async function save() {
+    setError(null);
+    setIsSaving(true);
+    try {
+      await api.saveAvailabilityWeek(participant.id, {
+        cells: [...dirtyCells.values()].map((cell) => ({
+          date: cell.date,
+          hour: cell.hour,
+          status: cell.status,
+          comment: cell.comment
+        }))
+      });
+      setDirtyCells(new Map());
+    } catch (unknownError) {
+      setError(readError(unknownError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <>
       <header className="page-head compact">
@@ -317,17 +392,76 @@ function ParticipantTableScreen({ participant }: { participant: ParticipantDto }
           <h1>{participant.displayName}</h1>
           <p>{participant.interests.length ? participant.interests.join(", ") : "интересы не указаны"}</p>
         </div>
+        {dirtyCells.size > 0 ? (
+          <button className="primary-button" disabled={isSaving} onClick={save} type="button">
+            {isSaving ? "Сохраняем..." : `Сохранить ${dirtyCells.size}`}
+          </button>
+        ) : null}
       </header>
+      {error ? <div className="notice danger">{error}</div> : null}
       <section className="surface">
         <header className="surface-head">
           <div>
             <h2>Личная таблица</h2>
-            <p>Просмотр подключен. Редактирование появится после API расписаний.</p>
+            <p>{isLoading ? "Загружаем неделю..." : canEdit ? "Клик по ячейке меняет статус и открывает детали. Сохранение только по кнопке." : "Только просмотр."}</p>
           </div>
+          <Legend />
         </header>
-        <AvailabilityGrid />
+        <div className="table-with-panel">
+          <AvailabilityGrid cells={cells} editable={canEdit} onChange={updateCell} onSelect={setSelectedCell} />
+          <CellDetailsPanel canEdit={canEdit} cell={selectedCell} onChange={updateCell} />
+        </div>
       </section>
     </>
+  );
+}
+
+function CellDetailsPanel({
+  canEdit,
+  cell,
+  onChange
+}: {
+  canEdit: boolean;
+  cell: AvailabilityCellDto | null;
+  onChange: (cell: AvailabilityCellDto) => void;
+}) {
+  if (!cell) {
+    return (
+      <aside className="cell-panel">
+        <h3>Ячейка</h3>
+        <p>Выберите час в таблице.</p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="cell-panel">
+      <h3>{formatCellDate(cell.date)} · {hours[cell.hour]}</h3>
+      <div className="status-picker">
+        {statuses.map((status) => (
+          <button
+            className={cell.status === status ? "active" : ""}
+            disabled={!canEdit}
+            key={status}
+            onClick={() => onChange({ ...cell, status })}
+            type="button"
+          >
+            <i className={`key ${status}`} />
+            {statusLabels[status]}
+          </button>
+        ))}
+      </div>
+      <label className="comment-field">
+        Комментарий
+        <textarea
+          disabled={!canEdit}
+          maxLength={500}
+          onChange={(event) => onChange({ ...cell, comment: event.target.value })}
+          placeholder="Что важно знать в это время"
+          value={cell.comment}
+        />
+      </label>
+    </aside>
   );
 }
 
@@ -343,34 +477,124 @@ function MetricCard({ label, value }: { label: string; value: number | string })
 function Legend() {
   return (
     <div className="legend">
-      <span><i className="key many-free" />много свободных</span>
-      <span><i className="key some-free" />есть свободные</span>
-      <span><i className="key maybe" />возможно</span>
-      <span><i className="key busy" />заняты</span>
-      <span><i className="key unknown" />нет данных</span>
+      {statuses.map((status) => (
+        <span key={status}><i className={`key ${status}`} />{statusLabels[status]}</span>
+      ))}
     </div>
   );
 }
 
-function AvailabilityGrid() {
+function AvailabilityGrid({
+  cells,
+  editable = false,
+  onChange,
+  onSelect
+}: {
+  cells: AvailabilityCellDto[];
+  editable?: boolean;
+  onChange?: (cell: AvailabilityCellDto) => void;
+  onSelect?: (cell: AvailabilityCellDto) => void;
+}) {
+  const cellMap = new Map(cells.map((cell) => [cellKey(cell), cell]));
+  const weekStart = startOfCurrentWeek();
+
   return (
     <div className="availability-grid" role="table" aria-label="Недельная таблица доступности">
       <div className="cell head" />
-      {days.map((day) => (
+      {days.map((day, index) => (
         <div className="cell head" key={day}>
-          {day}
+          {day} {addDays(weekStart, index).slice(5)}
         </div>
       ))}
-      {hours.map((hour) => (
-        <div className="availability-row" key={hour} role="row">
-          <div className="cell time">{hour}</div>
-          {days.map((day) => (
-            <button className="cell slot unknown" key={`${day}-${hour}`} title={`${day} ${hour}: нет данных`} />
-          ))}
+      {hours.map((hourLabel, hour) => (
+        <div className="availability-row" key={hourLabel} role="row">
+          <div className="cell time">{hourLabel}</div>
+          {days.map((day, dayIndex) => {
+            const date = addDays(weekStart, dayIndex);
+            const cell = cellMap.get(`${date}:${hour}`) ?? {
+              profileId: "aggregate",
+              date,
+              hour,
+              status: "unknown" as const,
+              comment: ""
+            };
+            return (
+              <button
+                className={`cell slot ${cell.status}${cell.comment ? " has-comment" : ""}`}
+                disabled={!editable && !onSelect}
+                key={`${day}-${hourLabel}`}
+                onClick={() => {
+                  const nextCell = editable ? { ...cell, status: nextStatus(cell.status) } : cell;
+                  if (editable) onChange?.(nextCell);
+                  onSelect?.(nextCell);
+                }}
+                title={`${day} ${hourLabel}: ${statusLabels[cell.status]}${cell.comment ? `, ${cell.comment}` : ""}`}
+                type="button"
+              />
+            );
+          })}
         </div>
       ))}
     </div>
   );
+}
+
+function aggregateCells(cells: AvailabilityCellDto[], totalParticipants: number) {
+  const grouped = new Map<string, AvailabilityCellDto[]>();
+  cells.forEach((cell) => {
+    const key = `${cell.date}:${cell.hour}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), cell]);
+  });
+
+  return [...grouped.entries()].map(([key, group]) => {
+    const [date = startOfCurrentWeek(), hour = "0"] = key.split(":");
+    return {
+      profileId: "aggregate",
+      date,
+      hour: Number(hour),
+      status: aggregateStatus(group, totalParticipants),
+      comment: ""
+    };
+  });
+}
+
+function aggregateStatus(cells: AvailabilityCellDto[], totalParticipants: number): AvailabilityStatusDto {
+  const free = cells.filter((cell) => cell.status === "free" || cell.status === "stream").length;
+  const maybe = cells.filter((cell) => cell.status === "maybe").length;
+  const busy = cells.filter((cell) => ["busy", "work", "study"].includes(cell.status)).length;
+  if (totalParticipants <= 0) return "unknown";
+  if (free >= Math.ceil(totalParticipants * 0.55)) return "free";
+  if (free > 0) return "stream";
+  if (maybe > 0) return "maybe";
+  if (busy > 0) return "busy";
+  return "unknown";
+}
+
+function nextStatus(status: AvailabilityStatusDto) {
+  const index = statuses.indexOf(status);
+  return statuses[(index + 1) % statuses.length] ?? "unknown";
+}
+
+function cellKey(cell: Pick<AvailabilityCellDto, "date" | "hour">) {
+  return `${cell.date}:${cell.hour}`;
+}
+
+function startOfCurrentWeek() {
+  const date = new Date();
+  const day = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - day);
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(dateKey: string, daysToAdd: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + daysToAdd);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatCellDate(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  return `${days[(date.getUTCDay() + 6) % 7]} ${dateKey.slice(5)}`;
 }
 
 function readError(error: unknown) {

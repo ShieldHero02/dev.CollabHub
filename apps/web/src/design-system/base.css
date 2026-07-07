@@ -219,12 +219,16 @@ button {
 }
 
 .key.many-free,
-.slot.many-free {
+.slot.many-free,
+.key.free,
+.slot.free {
   background: var(--color-free-strong);
 }
 
 .key.some-free,
-.slot.some-free {
+.slot.some-free,
+.key.stream,
+.slot.stream {
   background: var(--color-free);
 }
 
@@ -234,7 +238,11 @@ button {
 }
 
 .key.busy,
-.slot.busy {
+.slot.busy,
+.key.work,
+.slot.work,
+.key.study,
+.slot.study {
   background: var(--color-busy);
 }
 
@@ -284,7 +292,90 @@ button {
 }
 
 .cell.slot {
+  position: relative;
   cursor: pointer;
+}
+
+.cell.slot:disabled {
+  cursor: default;
+}
+
+.cell.slot.has-comment::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-text);
+  opacity: 0.72;
+}
+
+.table-with-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: 0;
+}
+
+.table-with-panel .availability-grid {
+  max-height: 620px;
+}
+
+.cell-panel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-left: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface), #000 10%);
+}
+
+.cell-panel h3 {
+  margin: 0;
+}
+
+.status-picker {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.status-picker button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.status-picker button.active {
+  border-color: var(--color-text);
+}
+
+.status-picker button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.comment-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-muted);
+}
+
+.comment-field textarea {
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #07101a;
+  color: var(--color-text);
+  padding: var(--space-3);
+  font: inherit;
 }
 
 .participant-card {
@@ -427,5 +518,14 @@ button {
 
   .participant-card button {
     grid-column: 1 / -1;
+  }
+
+  .table-with-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .cell-panel {
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
   }
 }

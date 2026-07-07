@@ -1,6 +1,8 @@
 import type {
   ApiEnvelope,
   AuthResponseDto,
+  AvailabilityWeekDto,
+  SaveAvailabilityWeekDto,
   CurrentUserDto,
   ParticipantDto
 } from "@collabhub/shared-types";
@@ -50,6 +52,21 @@ export class ApiClient {
 
   async participants() {
     const response = await this.request<ApiEnvelope<ParticipantDto[]>>("/api/participants");
+    return response.data;
+  }
+
+  async availabilityWeek(startDate: string, profileId?: string) {
+    const params = new URLSearchParams({ start: startDate });
+    if (profileId) params.set("profileId", profileId);
+    const response = await this.request<ApiEnvelope<AvailabilityWeekDto>>(`/api/availability/week?${params}`);
+    return response.data;
+  }
+
+  async saveAvailabilityWeek(profileId: string, payload: SaveAvailabilityWeekDto) {
+    const response = await this.request<ApiEnvelope<{ saved: number }>>(`/api/availability/profiles/${profileId}/week`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
     return response.data;
   }
 

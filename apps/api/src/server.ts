@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import { ZodError } from "zod";
 import { closePrisma } from "./plugins/prisma.js";
 import { registerAuthRoutes } from "./modules/auth/auth.routes.js";
+import { registerAvailabilityRoutes } from "./modules/availability/availability.routes.js";
 import { registerHealthRoutes } from "./modules/health/health.routes.js";
 import { registerImportRoutes } from "./modules/imports/imports.routes.js";
 import { registerRoleRoutes } from "./modules/roles/roles.routes.js";
@@ -40,6 +41,7 @@ export async function buildServer() {
   await registerAuthRoutes(server);
   await registerMeRoutes(server);
   await registerUserRoutes(server);
+  await registerAvailabilityRoutes(server);
   await registerRoleRoutes(server);
   await registerImportRoutes(server);
 
