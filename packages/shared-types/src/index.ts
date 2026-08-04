@@ -106,6 +106,20 @@ export type SyncSnapshotDto = {
   events: EventDto[];
 };
 
+export type SyncRevisionDto = {
+  revision: number;
+};
+
+export type UpdateUserDto = {
+  role?: string;
+  status?: "active" | "disabled";
+  displayName?: string;
+};
+
+export type ResetUserPasswordDto = {
+  temporaryPassword: string;
+};
+
 export type UserDto = {
   id: string;
   login: string;

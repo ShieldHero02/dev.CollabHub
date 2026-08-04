@@ -39,9 +39,27 @@ describe("participant permissions", () => {
     assert.equal(canEditParticipant(member, "other-profile"), false);
   });
 
-  it("allows team leads to view other profiles but follows the default edit permission", () => {
-    assert.equal(canViewParticipant(teamlead, "member-profile"), true);
-    assert.equal(canEditParticipant(teamlead, "member-profile"), false);
+  it("allows team leads to view only profiles in a shared team", () => {
+    assert.equal(canViewParticipant(teamlead, "member-profile", ["team-1"]), true);
+    assert.equal(canViewParticipant(teamlead, "other-profile", ["team-2"]), false);
+    assert.equal(canEditParticipant(teamlead, "member-profile", ["team-1"]), false);
+  });
+
+  it("allows explicit team editing only inside a shared team", () => {
+    const teamEditor: Actor = { ...teamlead, permissions: ["schedule:edit:team"] };
+    assert.equal(canEditParticipant(teamEditor, "member-profile", ["team-1"]), true);
+    assert.equal(canEditParticipant(teamEditor, "other-profile", ["team-2"]), false);
+  });
+
+  it("scopes explicit team schedule editing permission to a shared team", () => {
+    const teamEditor: Actor = {
+      ...teamlead,
+      permissions: ["schedule:view:team", "schedule:edit:team"]
+    };
+
+    assert.equal(canEditParticipant(teamEditor, "member-profile", ["team-1"]), true);
+    assert.equal(canEditParticipant(teamEditor, "other-profile", ["team-2"]), false);
+    assert.equal(canEditParticipant(teamEditor, "unassigned-profile", []), false);
   });
 
   it("denies unauthenticated actors", () => {
@@ -61,8 +79,11 @@ describe("event ownership permissions", () => {
     assert.equal(canDeleteEvent(member, "user-2", "user-1"), false);
   });
 
-  it("allows team leads to manage events owned by others", () => {
-    assert.equal(canEditEvent(teamlead, "user-2", "user-1"), true);
-    assert.equal(canDeleteEvent(teamlead, "user-2", "user-1"), true);
+  it("allows team leads to manage only events assigned to their team", () => {
+    assert.equal(canEditEvent(teamlead, "user-2", "user-1", "team-1"), true);
+    assert.equal(canDeleteEvent(teamlead, "user-2", "user-1", "team-1"), true);
+    assert.equal(canEditEvent(teamlead, "user-2", "user-1", "team-2"), false);
+    assert.equal(canDeleteEvent(teamlead, "user-2", "user-1", null), false);
   });
+
 });

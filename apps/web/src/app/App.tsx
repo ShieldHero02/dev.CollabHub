@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AvailabilityCellDto,
   AvailabilityStatusDto,
@@ -8,7 +8,7 @@ import type {
   ParticipantDto
 } from "@collabhub/shared-types";
 import { AppShell, type AppView } from "../shared/AppShell.js";
-import { AccountDto, ApiClient, apiBaseUrl, type ManagedUserDto, type OAuthProviderStatusDto } from "../shared/api.js";
+import { AccountDto, ApiClient, apiBaseUrl, isUnauthorizedError, type ManagedUserDto, type OAuthProviderStatusDto } from "../shared/api.js";
 
 const tokenStorageKey = "collabhub.v2.token";
 const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -35,7 +35,13 @@ export function App() {
   const [isBooting, setIsBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [oauthNotice, setOauthNotice] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [revision, setRevision] = useState(0);
+  const snapshotGeneration = useRef(0);
+  const appliedRevision = useRef(0);
+  const syncCheckInFlight = useRef(false);
   const api = useMemo(() => new ApiClient(token), [token]);
 
   const setToken = useCallback((nextToken: string | null) => {
@@ -44,13 +50,68 @@ export function App() {
     setTokenState(nextToken);
   }, []);
 
+  const clearExpiredSession = useCallback(() => {
+    snapshotGeneration.current += 1;
+    appliedRevision.current = 0;
+    syncCheckInFlight.current = false;
+    setIsSyncing(false);
+    setToken(null);
+    setCurrentUser(null);
+    setParticipants([]);
+    setEvents([]);
+    setActiveView("overview");
+    setError("Сессия завершилась. Войдите снова.");
+  }, [setToken]);
+
   const loadSnapshot = useCallback(async () => {
-    const snapshot = await api.syncSnapshot();
-    setParticipants(snapshot.participants);
-    setEvents(snapshot.events);
-    setRevision(snapshot.revision);
-    setSelectedParticipantId((current) => current ?? snapshot.participants[0]?.id ?? null);
-  }, [api]);
+    const generation = ++snapshotGeneration.current;
+    setIsSyncing(true);
+    try {
+      const snapshot = await api.syncSnapshot();
+      if (generation !== snapshotGeneration.current || snapshot.revision < appliedRevision.current) return;
+      appliedRevision.current = snapshot.revision;
+      setParticipants(snapshot.participants);
+      setEvents(snapshot.events);
+      setRevision(snapshot.revision);
+      setSelectedParticipantId((current) => current ?? snapshot.participants[0]?.id ?? null);
+      setLastSyncAt(new Date());
+      setSyncError(null);
+    } catch (unknownError) {
+      if (generation !== snapshotGeneration.current) return;
+      if (isUnauthorizedError(unknownError)) {
+        clearExpiredSession();
+        return;
+      }
+      setSyncError(readError(unknownError));
+      throw unknownError;
+    } finally {
+      if (generation === snapshotGeneration.current) setIsSyncing(false);
+    }
+  }, [api, clearExpiredSession]);
+
+  const checkForUpdates = useCallback(async () => {
+    if (syncCheckInFlight.current) return;
+    syncCheckInFlight.current = true;
+    setIsSyncing(true);
+    try {
+      const latest = await api.syncRevision();
+      if (latest.revision !== revision) {
+        await loadSnapshot();
+      } else {
+        setLastSyncAt(new Date());
+        setSyncError(null);
+      }
+    } catch (unknownError) {
+      if (isUnauthorizedError(unknownError)) {
+        clearExpiredSession();
+        return;
+      }
+      setSyncError(readError(unknownError));
+    } finally {
+      syncCheckInFlight.current = false;
+      setIsSyncing(false);
+    }
+  }, [api, clearExpiredSession, loadSnapshot, revision]);
 
   const loadSession = useCallback(async () => {
     setError(null);
@@ -81,19 +142,23 @@ export function App() {
   useEffect(() => {
     void loadSession()
       .catch((unknownError) => {
+        if (isUnauthorizedError(unknownError)) {
+          clearExpiredSession();
+          return;
+        }
         setError(readError(unknownError));
         setCurrentUser(null);
       })
       .finally(() => setIsBooting(false));
-  }, [loadSession]);
+  }, [clearExpiredSession, loadSession]);
 
   useEffect(() => {
     if (!currentUser) return;
     const timer = window.setInterval(() => {
-      void loadSnapshot().catch(() => undefined);
+      void checkForUpdates();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [currentUser, loadSnapshot]);
+  }, [checkForUpdates, currentUser]);
 
   const selectedParticipant =
     participants.find((participant) => participant.id === selectedParticipantId) ?? participants[0] ?? null;
@@ -118,6 +183,8 @@ export function App() {
     setCurrentUser(null);
     setParticipants([]);
     setEvents([]);
+    snapshotGeneration.current += 1;
+    appliedRevision.current = 0;
     setActiveView("overview");
   }
 
@@ -133,6 +200,10 @@ export function App() {
 
   return (
     <AppShell activeView={activeView} currentUser={currentUser} onLogout={handleLogout} onNavigate={handleNavigate}>
+      <div className={`sync-status${syncError ? " failed" : ""}`} role={syncError ? "alert" : "status"}>
+        <span>{syncError ? `Не удалось обновить данные: ${syncError}` : lastSyncAt ? `Обновлено в ${lastSyncAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Данные ещё не обновлены"}</span>
+        <button className="ghost-button" disabled={isSyncing} onClick={() => void checkForUpdates()} type="button">{isSyncing ? "Проверяем..." : "Проверить обновления"}</button>
+      </div>
       {error ? <div className="notice danger">{error}</div> : null}
       {oauthNotice ? <div className="notice success" role="status">{oauthNotice}</div> : null}
       {activeView === "overview" ? (
@@ -157,10 +228,10 @@ export function App() {
         />
       ) : null}
       {activeView === "my-table" && selectedParticipant ? (
-        <ParticipantTableScreen api={api} currentUser={currentUser} events={events} participant={selectedParticipant} onSaved={loadSnapshot} />
+        <ParticipantTableScreen api={api} currentUser={currentUser} events={events} participant={selectedParticipant} revision={revision} onSaved={loadSnapshot} />
       ) : null}
       {activeView === "events" ? <EventsScreen api={api} events={events} participants={participants} onChanged={loadSnapshot} /> : null}
-      {activeView === "management" && currentUser.permissions.includes("user:manage") ? <ManagementScreen api={api} currentUser={currentUser} onChanged={loadSnapshot} /> : null}
+      {activeView === "management" && currentUser.permissions.includes("user:manage") ? <ManagementScreen api={api} currentUser={currentUser} onChanged={loadSnapshot} revision={revision} /> : null}
       {activeView === "account" ? <AccountScreen api={api} onChanged={loadSnapshot} /> : null}
     </AppShell>
   );
@@ -272,10 +343,15 @@ function OverviewScreen({
 }) {
   const [cells, setCells] = useState<AvailabilityCellDto[]>([]);
   const [selected, setSelected] = useState<{ date: string; hour: number } | null>(null);
+  const availabilityGeneration = useRef(0);
   const weekStart = startOfCurrentWeek();
 
   useEffect(() => {
-    void api.availabilityWeek(weekStart).then((week) => setCells(week.cells));
+    const generation = ++availabilityGeneration.current;
+    void api.availabilityWeek(weekStart).then((week) => {
+      if (generation === availabilityGeneration.current) setCells(week.cells);
+    });
+    return () => { availabilityGeneration.current += 1; };
   }, [api, weekStart, revision]);
 
   const selectedDetails = selected ? cells.filter((cell) => cell.date === selected.date && cell.hour === selected.hour) : [];
@@ -369,12 +445,14 @@ function ParticipantTableScreen({
   currentUser,
   events,
   participant,
+  revision,
   onSaved
 }: {
   api: ApiClient;
   currentUser: CurrentUserDto;
   events: EventDto[];
   participant: ParticipantDto;
+  revision: number;
   onSaved: () => Promise<void>;
 }) {
   const [cells, setCells] = useState<AvailabilityCellDto[]>([]);
@@ -382,14 +460,61 @@ function ParticipantTableScreen({
   const [selectedCell, setSelectedCell] = useState<AvailabilityCellDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasPendingUpdate, setHasPendingUpdate] = useState(false);
+  const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
+  const availabilityGeneration = useRef(0);
   const canEdit = currentUser.profileId === participant.id || currentUser.permissions.includes("schedule:edit:all");
   const weekStart = startOfCurrentWeek();
 
   useEffect(() => {
+    const generation = ++availabilityGeneration.current;
     setDirtyCells(new Map());
     setSelectedCell(null);
-    void api.availabilityWeek(weekStart, participant.id).then((week) => setCells(week.cells)).catch((err) => setError(readError(err)));
+    setHasPendingUpdate(false);
+    setLoadedRevision(null);
+    void api.availabilityWeek(weekStart, participant.id).then((week) => {
+      if (generation !== availabilityGeneration.current) return;
+      setCells(week.cells);
+      setLoadedRevision(revision);
+    }).catch((err) => {
+      if (generation === availabilityGeneration.current) setError(readError(err));
+    });
+    return () => { availabilityGeneration.current += 1; };
   }, [api, participant.id, weekStart]);
+
+  useEffect(() => {
+    if (loadedRevision === null || loadedRevision === revision) return;
+    if (dirtyCells.size > 0) {
+      setHasPendingUpdate(true);
+      return;
+    }
+    const generation = ++availabilityGeneration.current;
+    void api.availabilityWeek(weekStart, participant.id).then((week) => {
+      if (generation !== availabilityGeneration.current) return;
+      setCells(week.cells);
+      setSelectedCell(null);
+      setHasPendingUpdate(false);
+      setLoadedRevision(revision);
+    }).catch((err) => {
+      if (generation === availabilityGeneration.current) setError(readError(err));
+    });
+  }, [api, dirtyCells.size, loadedRevision, participant.id, revision, weekStart]);
+
+  async function discardAndReload() {
+    const generation = ++availabilityGeneration.current;
+    setError(null);
+    try {
+      const week = await api.availabilityWeek(weekStart, participant.id);
+      if (generation !== availabilityGeneration.current) return;
+      setCells(week.cells);
+      setDirtyCells(new Map());
+      setSelectedCell(null);
+      setHasPendingUpdate(false);
+      setLoadedRevision(revision);
+    } catch (unknownError) {
+      if (generation === availabilityGeneration.current) setError(readError(unknownError));
+    }
+  }
 
   function updateCell(nextCell: AvailabilityCellDto) {
     setCells((current) => current.map((cell) => (cellKey(cell) === cellKey(nextCell) ? nextCell : cell)));
@@ -430,6 +555,7 @@ function ParticipantTableScreen({
         ) : null}
       </header>
       {error ? <div className="notice danger">{error}</div> : null}
+      {hasPendingUpdate ? <div className="notice update-pending" role="status"><span>В расписании есть внешние обновления. Сохраните свои изменения или отмените их, чтобы загрузить свежую версию.</span><button className="ghost-button" onClick={() => void discardAndReload()} type="button">Отменить мои изменения и обновить</button></div> : null}
       <section className="surface">
         <header className="surface-head">
           <div>
@@ -599,8 +725,7 @@ function oauthProviderLabel(provider: string | null) {
   return "внешний сервис";
 }
 
-const manageableRoles = ["manager", "teamlead", "member", "viewer"] as const;
-const masterManageableRoles = ["head_admin", "admin", ...manageableRoles] as const;
+const roleHierarchy = ["master", "head_admin", "admin", "manager", "teamlead", "member", "viewer"] as const;
 const roleLabels: Record<string, string> = {
   master: "Владелец",
   head_admin: "Главный администратор",
@@ -610,8 +735,17 @@ const roleLabels: Record<string, string> = {
   member: "Участник",
   viewer: "Наблюдатель"
 };
+const roleDescriptions: Record<string, string> = {
+  master: "Владелец системы — изменение запрещено.",
+  head_admin: "Управляет сообществом и администраторами.",
+  admin: "Управляет участниками, расписанием и событиями.",
+  manager: "Организует события и общие активности.",
+  teamlead: "Работает с составом и событиями своей команды.",
+  member: "Ведёт профиль, расписание и участвует в событиях.",
+  viewer: "Только просматривает разрешённые данные."
+};
 
-function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; currentUser: CurrentUserDto; onChanged: () => Promise<void> }) {
+function ManagementScreen({ api, currentUser, onChanged, revision }: { api: ApiClient; currentUser: CurrentUserDto; onChanged: () => Promise<void>; revision: number }) {
   const [users, setUsers] = useState<ManagedUserDto[]>([]);
   const [login, setLogin] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -621,6 +755,9 @@ function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; cur
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const loadUsers = useCallback(async () => {
     setError(null);
@@ -635,7 +772,7 @@ function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; cur
 
   useEffect(() => {
     void loadUsers();
-  }, [loadUsers]);
+  }, [loadUsers, revision]);
 
   async function createUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -659,7 +796,13 @@ function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; cur
     }
   }
 
-  const roles = currentUser.role === "master" ? masterManageableRoles : manageableRoles;
+  const actorRank = roleHierarchy.indexOf(currentUser.role as (typeof roleHierarchy)[number]);
+  const roles = roleHierarchy.slice(Math.max(0, actorRank) + 1);
+  const visibleUsers = users.filter((user) => {
+    const search = query.trim().toLocaleLowerCase();
+    const matchesSearch = !search || user.login.toLocaleLowerCase().includes(search) || user.profile?.displayName.toLocaleLowerCase().includes(search);
+    return matchesSearch && (roleFilter === "all" || user.role === roleFilter) && (statusFilter === "all" || user.status === statusFilter);
+  });
 
   return (
     <>
@@ -686,13 +829,88 @@ function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; cur
         </form>
         <section className="surface managed-users">
           <header className="surface-head"><div><h2>Люди сообщества</h2><p>{isLoading ? "Загружаем список..." : `${users.length} аккаунтов`}</p></div><button className="ghost-button" disabled={isLoading} onClick={() => { setIsLoading(true); void loadUsers(); }} type="button">Обновить</button></header>
+          <div className="management-filters">
+            <label>Поиск<input placeholder="Имя или логин" type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            <label>Роль<select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}><option value="all">Все роли</option>{Object.entries(roleLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+            <label>Статус<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Все статусы</option><option value="active">Активные</option><option value="disabled">Неактивные</option></select></label>
+          </div>
           {!isLoading && !users.length ? <div className="empty-state">Пока нет участников.</div> : null}
+          {!isLoading && users.length > 0 && !visibleUsers.length ? <div className="empty-state">По этим фильтрам никто не найден.</div> : null}
           <div className="managed-user-list">
-            {users.map((user) => <article className="managed-user-row" key={user.id}><span className="avatar-dot" style={{ background: user.profile?.color ?? "var(--color-unknown)" }} /><div><b>{user.profile?.displayName ?? user.login}</b><small>@{user.login}</small></div><span className="role-badge">{roleLabels[user.role] ?? user.role}</span><span className={`status-badge ${user.status}`}>{user.status === "active" ? "Активен" : user.status}</span></article>)}
+            {visibleUsers.map((user) => <ManagedUserRow api={api} currentUser={currentUser} key={user.id} onSaved={async () => { await Promise.all([loadUsers(), onChanged()]); }} roleOptions={roles} user={user} />)}
           </div>
         </section>
       </section>
     </>
+  );
+}
+
+function ManagedUserRow({ api, currentUser, onSaved, roleOptions, user }: { api: ApiClient; currentUser: CurrentUserDto; onSaved: () => Promise<void>; roleOptions: readonly string[]; user: ManagedUserDto }) {
+  const [displayName, setDisplayName] = useState(user.profile?.displayName ?? "");
+  const [role, setRole] = useState(user.role);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmStatus, setConfirmStatus] = useState<"active" | "disabled" | null>(null);
+  const [confirmPasswordReset, setConfirmPasswordReset] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+  const isSelf = user.login === currentUser.login;
+  const isMasterAccount = user.role === "master";
+  const actorRank = roleHierarchy.indexOf(currentUser.role as (typeof roleHierarchy)[number]);
+  const targetRank = roleHierarchy.indexOf(user.role as (typeof roleHierarchy)[number]);
+  const isAtOrAboveHierarchy = targetRank >= 0 && actorRank >= 0 && targetRank <= actorRank;
+  const protectedAccount = isSelf || isMasterAccount || isAtOrAboveHierarchy;
+  const dirty = displayName.trim() !== (user.profile?.displayName ?? "") || role !== user.role;
+
+  useEffect(() => {
+    setDisplayName(user.profile?.displayName ?? "");
+    setRole(user.role);
+  }, [user.profile?.displayName, user.role]);
+
+  async function update(payload: { role?: string; status?: "active" | "disabled"; displayName?: string }) {
+    setError(null);
+    setIsSaving(true);
+    try {
+      await api.updateUser(user.id, payload);
+      setConfirmStatus(null);
+      await onSaved();
+    } catch (unknownError) {
+      setError(readError(unknownError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function resetPassword() {
+    const password = generatePassword();
+    setError(null);
+    setIsSaving(true);
+    try {
+      await api.resetUserPassword(user.id, password);
+      setTemporaryPassword(password);
+      setConfirmPasswordReset(false);
+    } catch (unknownError) {
+      setError(readError(unknownError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const nextStatus = user.status === "active" ? "disabled" : "active";
+  return (
+    <article className={`managed-user-row${dirty ? " dirty" : ""}`}>
+      <div className="managed-user-identity"><span className="avatar-dot" style={{ background: user.profile?.color ?? "var(--color-unknown)" }} /><div><b>{user.profile?.displayName ?? user.login}</b><small>@{user.login}</small></div></div>
+      <label>Имя<input disabled={protectedAccount || isSaving} maxLength={80} minLength={2} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
+      <label>Роль<select disabled={protectedAccount || isSaving} title={roleDescriptions[role]} value={role} onChange={(event) => setRole(event.target.value)}>{!roleOptions.includes(role) ? <option value={role}>{roleLabels[role] ?? role}</option> : null}{roleOptions.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select><small>{roleDescriptions[role]}</small></label>
+      <div className="managed-user-state"><span className={`status-badge ${user.status}`}>{user.status === "active" ? "Активен" : "Неактивен"}</span>{protectedAccount ? <small>{isSelf ? "Это ваш аккаунт" : isMasterAccount ? "Владелец защищён" : "Недоступно по иерархии ролей"}</small> : null}</div>
+      <div className="managed-user-actions">
+        {dirty ? <><span className="unsaved-label">Есть изменения</span><button className="primary-button" disabled={isSaving || displayName.trim().length < 2} onClick={() => void update({ displayName: displayName.trim(), role })} type="button">{isSaving ? "Сохраняем..." : "Сохранить"}</button><button className="ghost-button" disabled={isSaving} onClick={() => { setDisplayName(user.profile?.displayName ?? ""); setRole(user.role); setError(null); }} type="button">Отменить</button></> : null}
+        {!protectedAccount && !dirty ? <><button className="ghost-button" disabled={isSaving} onClick={() => { setConfirmPasswordReset(false); setConfirmStatus(nextStatus); }} type="button">{nextStatus === "disabled" ? "Деактивировать" : "Активировать"}</button><button className="ghost-button" disabled={isSaving} onClick={() => { setConfirmStatus(null); setConfirmPasswordReset(true); }} type="button">Сбросить пароль</button></> : null}
+      </div>
+      {confirmStatus ? <div className="inline-confirm" role="alert"><p>{confirmStatus === "disabled" ? "Отключить вход и доступ этого участника? Данные профиля сохранятся." : "Вернуть участнику доступ к CollabHub?"}</p><button className={confirmStatus === "disabled" ? "danger-button" : "primary-button"} disabled={isSaving} onClick={() => void update({ status: confirmStatus })} type="button">{isSaving ? "Применяем..." : "Подтвердить"}</button><button className="ghost-button" disabled={isSaving} onClick={() => setConfirmStatus(null)} type="button">Отмена</button></div> : null}
+      {confirmPasswordReset ? <div className="inline-confirm" role="alert"><p>Создать новый временный пароль для @{user.login}? Все активные сессии участника будут завершены.</p><button className="danger-button" disabled={isSaving} onClick={() => void resetPassword()} type="button">{isSaving ? "Сбрасываем..." : "Сбросить пароль"}</button><button className="ghost-button" disabled={isSaving} onClick={() => setConfirmPasswordReset(false)} type="button">Отмена</button></div> : null}
+      {temporaryPassword ? <div className="row-credential" role="status"><div><b>Новый временный пароль для @{user.login}</b><small>Он показывается только сейчас. Передайте его безопасным способом.</small></div><code>{temporaryPassword}</code><button className="secondary-button" onClick={() => void navigator.clipboard.writeText(temporaryPassword)} type="button">Копировать</button><button className="ghost-button" onClick={() => setTemporaryPassword(null)} type="button">Я сохранил пароль</button></div> : null}
+      {error ? <div className="row-error" role="alert">{error}</div> : null}
+    </article>
   );
 }
 

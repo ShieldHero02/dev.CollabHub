@@ -49,6 +49,23 @@ export type CreateManagedUserDto = {
   role: string;
 };
 
+export type UpdateManagedUserDto = {
+  role?: string;
+  status?: "active" | "disabled";
+  displayName?: string;
+};
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+export function isUnauthorizedError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
+}
+
 export type OAuthProviderStatusDto = {
   provider: "twitch" | "youtube";
   enabled: boolean;
@@ -132,6 +149,22 @@ export class ApiClient {
     return response.data;
   }
 
+  async updateUser(userId: string, payload: UpdateManagedUserDto) {
+    const response = await this.request<ApiEnvelope<{ id: string; role: string; status: string; displayName: string | null }>>(`/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    return response.data;
+  }
+
+  async resetUserPassword(userId: string, temporaryPassword: string) {
+    const response = await this.request<ApiEnvelope<{ ok: true }>>(`/users/${userId}/password`, {
+      method: "PUT",
+      body: JSON.stringify({ temporaryPassword })
+    });
+    return response.data;
+  }
+
   async availabilityWeek(startDate: string, profileId?: string) {
     const params = new URLSearchParams({ start: startDate });
     if (profileId) params.set("profileId", profileId);
@@ -177,6 +210,11 @@ export class ApiClient {
     return response.data;
   }
 
+  async syncRevision() {
+    const response = await this.request<ApiEnvelope<{ revision: number }>>("/sync/revision");
+    return response.data;
+  }
+
   private async request<T>(path: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
@@ -205,7 +243,7 @@ export class ApiClient {
         typeof payload.message === "string"
           ? payload.message
           : "API request failed";
-      throw new Error(message);
+      throw new ApiError(message, response.status);
     }
 
     return payload as T;

@@ -4,9 +4,7 @@ import { z } from "zod";
 import { forbidden } from "../../http/errors.js";
 import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
-import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
-
-type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
+import { bumpWorkspaceRevisionInTransaction } from "../workspaces/workspace.service.js";
 
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -110,18 +108,23 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
       where: {
         id: params.profileId,
         workspaceId: actor.workspaceId
+      },
+      include: {
+        teamMemberships: { select: { teamId: true } },
+        leadingTeams: { select: { id: true } }
       }
     });
     if (!profile) {
       return forbidden(reply, "You cannot edit another workspace schedule");
     }
-    if (!canEditParticipant(actor, params.profileId)) {
+    const targetTeamIds = [...profile.teamMemberships.map((membership) => membership.teamId), ...profile.leadingTeams.map((team) => team.id)];
+    if (!canEditParticipant(actor, params.profileId, targetTeamIds)) {
       return forbidden(reply, "You cannot edit this participant schedule");
     }
 
     const input = saveWeekSchema.parse(request.body);
 
-    await prisma.$transaction(async (tx: PrismaTx) => {
+    await prisma.$transaction(async (tx) => {
       for (const cell of input.cells) {
         if (!isValidHour(cell.hour)) continue;
         const date = parseDateKey(cell.date);
@@ -170,36 +173,57 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
           });
         }
       }
+      await bumpWorkspaceRevisionInTransaction(tx, profile.workspaceId, "availability", actor.id);
     });
-    await bumpWorkspaceRevision(profile.workspaceId, "availability", actor.id);
 
     return { data: { saved: input.cells.length } };
   });
 }
 
 async function resolveVisibleProfileIds(actor: NonNullable<Awaited<ReturnType<typeof requireUser>>>, requestedProfileId?: string) {
+  if (!actor.workspaceId) return [];
+  const workspaceId = actor.workspaceId;
   if (requestedProfileId) {
-    if (!actor.workspaceId || !canViewParticipant(actor, requestedProfileId)) return [];
     const profile = await prisma.participantProfile.findFirst({
       where: {
         id: requestedProfileId,
-        workspaceId: actor.workspaceId
+        workspaceId
       },
-      select: { id: true }
+      select: {
+        id: true,
+        teamMemberships: { select: { teamId: true } },
+        leadingTeams: { select: { id: true } }
+      }
     });
-    return profile ? [profile.id] : [];
+    if (!profile) return [];
+    const targetTeamIds = [...profile.teamMemberships.map((membership) => membership.teamId), ...profile.leadingTeams.map((team) => team.id)];
+    return canViewParticipant(actor, profile.id, targetTeamIds) ? [profile.id] : [];
   }
 
   if (actor.permissions.includes("schedule:view:all")) {
-    if (!actor.workspaceId) return [];
     const profiles = await prisma.participantProfile.findMany({
-      where: { workspaceId: actor.workspaceId },
+      where: { workspaceId },
       select: { id: true }
     });
     return profiles.map((profile: { id: string }) => profile.id);
   }
 
-  return actor.profileId ? [actor.profileId] : [];
+  if (actor.permissions.includes("schedule:view:team") && actor.teamIds?.length) {
+    const profiles = await prisma.participantProfile.findMany({
+      where: {
+        workspaceId,
+        OR: [
+          ...(actor.profileId ? [{ id: actor.profileId }] : []),
+          { teamMemberships: { some: { teamId: { in: actor.teamIds } } } },
+          { leadingTeams: { some: { id: { in: actor.teamIds } } } }
+        ]
+      },
+      select: { id: true }
+    });
+    return profiles.map((profile) => profile.id);
+  }
+
+  return actor.profileId && canViewParticipant(actor, actor.profileId) ? [actor.profileId] : [];
 }
 
 function parseDateKey(key: string) {

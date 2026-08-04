@@ -10,6 +10,7 @@ export type AuthUser = {
   role: Role;
   profileId: string | null;
   workspaceId: string | null;
+  teamIds: string[];
   permissions: Permission[];
 };
 
@@ -86,7 +87,12 @@ export async function resolveAuthUserFromToken(token: string): Promise<AuthUser 
     include: {
       user: {
         include: {
-          profile: true,
+          profile: {
+            include: {
+              teamMemberships: { select: { teamId: true } },
+              leadingTeams: { select: { id: true } }
+            }
+          },
           workspaceLinks: {
             take: 1,
             orderBy: { createdAt: "asc" }
@@ -122,6 +128,9 @@ export async function resolveAuthUserFromToken(token: string): Promise<AuthUser 
     role: session.user.roleKey as Role,
     profileId: session.user.profile?.id ?? null,
     workspaceId: session.user.profile?.workspaceId ?? session.user.workspaceLinks[0]?.workspaceId ?? null,
+    teamIds: session.user.profile
+      ? [...session.user.profile.teamMemberships.map((membership) => membership.teamId), ...session.user.profile.leadingTeams.map((team) => team.id)]
+      : [],
     permissions: [...permissions]
   };
 }

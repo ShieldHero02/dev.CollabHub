@@ -1,5 +1,6 @@
 import { prisma } from "../../plugins/prisma.js";
 import type { Role } from "@collabhub/domain";
+import type { Prisma } from "@prisma/client";
 
 export const defaultWorkspaceSlug = "main";
 
@@ -48,13 +49,23 @@ export async function workspaceIdForUser(userId: string) {
 }
 
 export async function bumpWorkspaceRevision(workspaceId: string, scope: string, actorUserId?: string) {
-  const latest = await prisma.syncRevision.findFirst({
+  return prisma.$transaction((tx) => bumpWorkspaceRevisionInTransaction(tx, workspaceId, scope, actorUserId));
+}
+
+export async function bumpWorkspaceRevisionInTransaction(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  scope: string,
+  actorUserId?: string
+) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${workspaceId}, 0))`;
+  const latest = await tx.syncRevision.findFirst({
     where: { workspaceId },
     orderBy: { version: "desc" },
     select: { version: true }
   });
-  const version = (latest?.version ?? 0) + 1;
-  await prisma.syncRevision.create({
+  const version = nextWorkspaceRevision(latest?.version ?? null);
+  await tx.syncRevision.create({
     data: {
       workspaceId,
       version,
@@ -63,6 +74,10 @@ export async function bumpWorkspaceRevision(workspaceId: string, scope: string, 
     }
   });
   return version;
+}
+
+export function nextWorkspaceRevision(latestVersion: number | null) {
+  return (latestVersion ?? 0) + 1;
 }
 
 export async function currentWorkspaceRevision(workspaceId: string) {

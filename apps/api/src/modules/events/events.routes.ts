@@ -11,9 +11,9 @@ import { z } from "zod";
 import { forbidden } from "../../http/errors.js";
 import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
-import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
+import { bumpWorkspaceRevisionInTransaction } from "../workspaces/workspace.service.js";
+import type { Prisma } from "@prisma/client";
 
-type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
 
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -39,6 +39,7 @@ export async function registerEventRoutes(server: FastifyInstance) {
     const actor = await requireUser(request, reply);
     if (!actor) return reply;
     if (!canViewEvents(actor) || !actor.workspaceId) return { data: [] };
+    const actorWithTeams = await actorWithTeamIds(actor);
 
     const query = eventQuerySchema.parse(request.query);
     const dateFilter = {
@@ -59,7 +60,7 @@ export async function registerEventRoutes(server: FastifyInstance) {
     });
 
     return {
-      data: events.map((event: any) => eventDto(event, actor.id, actor))
+      data: events.map((event: any) => eventDto(event, actor.id, actorWithTeams))
     };
   });
 
@@ -69,29 +70,36 @@ export async function registerEventRoutes(server: FastifyInstance) {
     if (!canCreateEvent(actor) || !actor.workspaceId) return forbidden(reply);
 
     const input = eventInputSchema.parse(request.body);
-    if (!(await participantIdsBelongToWorkspace(input.participantIds, actor.workspaceId))) {
-      return forbidden(reply, "Event participants must belong to your workspace");
-    }
-    const event = await prisma.event.create({
-      data: {
-        workspaceId: actor.workspaceId,
-        title: input.title,
-        activity: input.activity || null,
-        description: input.description || null,
-        date: parseDateKey(input.date),
-        startHour: input.startHour,
-        endHour: input.endHour,
-        createdByUserId: actor.id,
-        participants: {
-          create: input.participantIds.map((profileId: string) => ({
-            profileId,
-            status: profileId === actor.profileId ? "going" : "invited"
-          }))
-        }
-      },
-      include: { participants: { include: { profile: true } } }
+    const event = await prisma.$transaction(async (tx) => {
+      if (!(await participantIdsBelongToWorkspace(tx, input.participantIds, actor.workspaceId!))) {
+        throw new CrossWorkspaceParticipantError();
+      }
+      const created = await tx.event.create({
+        data: {
+          workspaceId: actor.workspaceId!,
+          title: input.title,
+          activity: input.activity || null,
+          description: input.description || null,
+          date: parseDateKey(input.date),
+          startHour: input.startHour,
+          endHour: input.endHour,
+          createdByUserId: actor.id,
+          participants: {
+            create: input.participantIds.map((profileId: string) => ({
+              profileId,
+              status: profileId === actor.profileId ? "going" : "invited"
+            }))
+          }
+        },
+        include: { participants: { include: { profile: true } } }
+      });
+      await bumpWorkspaceRevisionInTransaction(tx, actor.workspaceId!, "events", actor.id);
+      return created;
+    }).catch((error) => {
+      if (error instanceof CrossWorkspaceParticipantError) return null;
+      throw error;
     });
-    await bumpWorkspaceRevision(actor.workspaceId, "events", actor.id);
+    if (!event) return forbidden(reply, "Event participants must belong to your workspace");
 
     return reply.code(201).send({ data: eventDto(event, actor.id, actor) });
   });
@@ -103,17 +111,18 @@ export async function registerEventRoutes(server: FastifyInstance) {
     const params = z.object({ eventId: z.string() }).parse(request.params);
     const existing = await prisma.event.findUnique({ where: { id: params.eventId } });
     if (!existing) return reply.code(404).send({ error: "not_found", message: "Event not found" });
-    if (!actor.workspaceId || existing.workspaceId !== actor.workspaceId || !canEditEvent(actor, existing.createdByUserId, actor.id)) {
+    const actorWithTeams = await actorWithTeamIds(actor);
+    if (!actor.workspaceId || existing.workspaceId !== actor.workspaceId || !canEditEvent(actorWithTeams, existing.createdByUserId, actor.id, existing.teamId)) {
       return forbidden(reply);
     }
 
     const input = eventInputSchema.parse(request.body);
-    if (!(await participantIdsBelongToWorkspace(input.participantIds, actor.workspaceId))) {
-      return forbidden(reply, "Event participants must belong to your workspace");
-    }
-    const event = await prisma.$transaction(async (tx: PrismaTx) => {
+    const event = await prisma.$transaction(async (tx) => {
+      if (!(await participantIdsBelongToWorkspace(tx, input.participantIds, actor.workspaceId!))) {
+        throw new CrossWorkspaceParticipantError();
+      }
       await tx.eventParticipant.deleteMany({ where: { eventId: existing.id } });
-      return tx.event.update({
+      const updated = await tx.event.update({
         where: { id: existing.id },
         data: {
           title: input.title,
@@ -131,9 +140,14 @@ export async function registerEventRoutes(server: FastifyInstance) {
         },
         include: { participants: { include: { profile: true } } }
       });
+      await bumpWorkspaceRevisionInTransaction(tx, actor.workspaceId!, "events", actor.id);
+      return updated;
+    }).catch((error) => {
+      if (error instanceof CrossWorkspaceParticipantError) return null;
+      throw error;
     });
-    await bumpWorkspaceRevision(actor.workspaceId, "events", actor.id);
-    return { data: eventDto(event, actor.id, actor) };
+    if (!event) return forbidden(reply, "Event participants must belong to your workspace");
+    return { data: eventDto(event, actor.id, actorWithTeams) };
   });
 
   server.put("/api/events/:eventId/response", async (request, reply) => {
@@ -146,21 +160,14 @@ export async function registerEventRoutes(server: FastifyInstance) {
     const event = await prisma.event.findUnique({ where: { id: params.eventId } });
     if (!event || event.workspaceId !== actor.workspaceId) return reply.code(404).send({ error: "not_found", message: "Event not found" });
 
-    await prisma.eventParticipant.upsert({
-      where: {
-        eventId_profileId: {
-          eventId: event.id,
-          profileId: actor.profileId
-        }
-      },
-      create: {
-        eventId: event.id,
-        profileId: actor.profileId,
-        status: input.status
-      },
-      update: { status: input.status }
+    await prisma.$transaction(async (tx) => {
+      await tx.eventParticipant.upsert({
+        where: { eventId_profileId: { eventId: event.id, profileId: actor.profileId! } },
+        create: { eventId: event.id, profileId: actor.profileId!, status: input.status },
+        update: { status: input.status }
+      });
+      await bumpWorkspaceRevisionInTransaction(tx, actor.workspaceId!, "events", actor.id);
     });
-    await bumpWorkspaceRevision(actor.workspaceId, "events", actor.id);
     return { data: { ok: true } };
   });
 
@@ -171,21 +178,24 @@ export async function registerEventRoutes(server: FastifyInstance) {
     const params = z.object({ eventId: z.string() }).parse(request.params);
     const event = await prisma.event.findUnique({ where: { id: params.eventId } });
     if (!event) return reply.code(404).send({ error: "not_found", message: "Event not found" });
-    if (!actor.workspaceId || event.workspaceId !== actor.workspaceId || !canDeleteEvent(actor, event.createdByUserId, actor.id)) {
+    const actorWithTeams = await actorWithTeamIds(actor);
+    if (!actor.workspaceId || event.workspaceId !== actor.workspaceId || !canDeleteEvent(actorWithTeams, event.createdByUserId, actor.id, event.teamId)) {
       return forbidden(reply);
     }
 
-    await prisma.event.delete({ where: { id: event.id } });
-    await bumpWorkspaceRevision(actor.workspaceId, "events", actor.id);
+    await prisma.$transaction(async (tx) => {
+      await tx.event.delete({ where: { id: event.id } });
+      await bumpWorkspaceRevisionInTransaction(tx, actor.workspaceId!, "events", actor.id);
+    });
     return { data: { ok: true } };
   });
 }
 
-async function participantIdsBelongToWorkspace(participantIds: string[], workspaceId: string) {
+async function participantIdsBelongToWorkspace(tx: Prisma.TransactionClient, participantIds: string[], workspaceId: string) {
   const uniqueParticipantIds = [...new Set(participantIds)];
   if (uniqueParticipantIds.length === 0) return true;
 
-  const matchingProfiles = await prisma.participantProfile.count({
+  const matchingProfiles = await tx.participantProfile.count({
     where: {
       id: { in: uniqueParticipantIds },
       workspaceId
@@ -193,6 +203,20 @@ async function participantIdsBelongToWorkspace(participantIds: string[], workspa
   });
   return matchingProfiles === uniqueParticipantIds.length;
 }
+
+async function actorWithTeamIds<T extends { profileId: string | null; workspaceId: string | null }>(actor: T) {
+  if (!actor.profileId || !actor.workspaceId) return { ...actor, teamIds: [] };
+  const teams = await prisma.team.findMany({
+    where: {
+      workspaceId: actor.workspaceId,
+      OR: [{ leadProfileId: actor.profileId }, { members: { some: { profileId: actor.profileId } } }]
+    },
+    select: { id: true }
+  });
+  return { ...actor, teamIds: teams.map((team) => team.id) };
+}
+
+class CrossWorkspaceParticipantError extends Error {}
 
 function eventDto(event: any, actorUserId: string, actor: any) {
   return {
@@ -204,7 +228,7 @@ function eventDto(event: any, actorUserId: string, actor: any) {
     startHour: event.startHour,
     endHour: event.endHour,
     createdByUserId: event.createdByUserId,
-    canEdit: canEditEvent(actor, event.createdByUserId, actorUserId),
+    canEdit: canEditEvent(actor, event.createdByUserId, actorUserId, event.teamId),
     participants: event.participants.map((link: any) => ({
       profileId: link.profileId,
       displayName: link.profile.displayName,

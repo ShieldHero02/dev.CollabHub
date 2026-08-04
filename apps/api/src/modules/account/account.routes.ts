@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
-import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
-
-type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
+import { bumpWorkspaceRevisionInTransaction } from "../workspaces/workspace.service.js";
 
 const accountUpdateSchema = z.object({
   displayName: z.string().trim().min(2).max(80),
@@ -50,7 +48,7 @@ export async function registerAccountRoutes(server: FastifyInstance) {
     if (!actor.profileId) return reply.code(409).send({ error: "missing_profile", message: "Account has no participant profile" });
 
     const input = accountUpdateSchema.parse(request.body);
-    await prisma.$transaction(async (tx: PrismaTx) => {
+    await prisma.$transaction(async (tx) => {
       await tx.participantProfile.update({
         where: { id: actor.profileId! },
         data: {
@@ -75,8 +73,8 @@ export async function registerAccountRoutes(server: FastifyInstance) {
           showEvents: input.showEvents
         }
       });
+      if (actor.workspaceId) await bumpWorkspaceRevisionInTransaction(tx, actor.workspaceId, "account", actor.id);
     });
-    if (actor.workspaceId) await bumpWorkspaceRevision(actor.workspaceId, "account", actor.id);
 
     return { data: { ok: true } };
   });

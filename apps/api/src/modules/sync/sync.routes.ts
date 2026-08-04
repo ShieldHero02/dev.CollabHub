@@ -11,20 +11,25 @@ export async function registerSyncRoutes(server: FastifyInstance) {
     if (!actor.workspaceId) {
       return { data: { revision: 0, participants: [], events: [] } };
     }
+    const workspaceId = actor.workspaceId;
 
-    const [revision, participants, events] = await Promise.all([
-      currentWorkspaceRevision(actor.workspaceId),
-      prisma.participantProfile.findMany({
-        where: { workspaceId: actor.workspaceId },
+    const [revision, participants, events] = await prisma.$transaction(async (tx) => Promise.all([
+      tx.syncRevision.findFirst({
+        where: { workspaceId },
+        orderBy: { version: "desc" },
+        select: { version: true }
+      }).then((row) => row?.version ?? 0),
+      tx.participantProfile.findMany({
+        where: { workspaceId },
         orderBy: { displayName: "asc" }
       }),
-      prisma.event.findMany({
-        where: { workspaceId: actor.workspaceId },
+      tx.event.findMany({
+        where: { workspaceId },
         orderBy: [{ date: "asc" }, { startHour: "asc" }],
         include: { participants: { include: { profile: true } } },
         take: 100
       })
-    ]);
+    ]), { isolationLevel: "RepeatableRead" });
 
     return {
       data: {
@@ -45,7 +50,7 @@ export async function registerSyncRoutes(server: FastifyInstance) {
           startHour: event.startHour,
           endHour: event.endHour,
           createdByUserId: event.createdByUserId,
-          canEdit: canEditEvent(actor, event.createdByUserId, actor.id),
+          canEdit: canEditEvent(actor, event.createdByUserId, actor.id, event.teamId),
           participants: event.participants.map((link: any) => ({
             profileId: link.profileId,
             displayName: link.profile.displayName,
@@ -55,5 +60,12 @@ export async function registerSyncRoutes(server: FastifyInstance) {
         }))
       }
     };
+  });
+
+  server.get("/api/sync/revision", async (request, reply) => {
+    const actor = await requireUser(request, reply);
+    if (!actor) return reply;
+    const revision = actor.workspaceId ? await currentWorkspaceRevision(actor.workspaceId) : 0;
+    return { data: { revision } };
   });
 }
