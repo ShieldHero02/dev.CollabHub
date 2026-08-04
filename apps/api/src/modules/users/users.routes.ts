@@ -5,6 +5,7 @@ import { requirePermission, requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
 import { assignRoleByKey, ensureSystemAccess } from "../auth/rbac.seed.js";
 import { hashPassword } from "../auth/passwords.js";
+import { bumpWorkspaceRevision, ensureDefaultWorkspace, linkUserToWorkspace } from "../workspaces/workspace.service.js";
 
 const createUserSchema = z.object({
   login: z.string().trim().min(2).max(64),
@@ -44,8 +45,14 @@ export async function registerUserRoutes(server: FastifyInstance) {
   server.get("/api/users", async (request, reply) => {
     const user = await requirePermission(request, reply, "user:manage");
     if (!user) return reply;
+    if (!user.workspaceId) return { data: [] };
 
     const users = await prisma.user.findMany({
+      where: {
+        workspaceLinks: {
+          some: { workspaceId: user.workspaceId }
+        }
+      },
       orderBy: { createdAt: "asc" },
       include: {
         profile: true,
@@ -80,6 +87,9 @@ export async function registerUserRoutes(server: FastifyInstance) {
     await ensureSystemAccess();
 
     const input = createUserSchema.parse(request.body);
+    const workspace = actor.workspaceId
+      ? await prisma.workspace.findUniqueOrThrow({ where: { id: actor.workspaceId } })
+      : await ensureDefaultWorkspace();
     if (input.role === "master" && actor.role !== "master") {
       return reply.code(403).send({ error: "forbidden", message: "Only Master can create another master-level account" });
     }
@@ -94,6 +104,7 @@ export async function registerUserRoutes(server: FastifyInstance) {
         profile: {
           create: {
             displayName: input.displayName,
+            workspaceId: workspace.id,
             color: input.color,
             interests: input.interests
           }
@@ -105,6 +116,8 @@ export async function registerUserRoutes(server: FastifyInstance) {
       include: { profile: true }
     });
     await assignRoleByKey(created.id, input.role as Role);
+    await linkUserToWorkspace(created.id, input.role as Role, workspace.id);
+    await bumpWorkspaceRevision(workspace.id, "users", actor.id);
 
     return reply.code(201).send({
       data: {
@@ -119,8 +132,10 @@ export async function registerUserRoutes(server: FastifyInstance) {
   server.get("/api/participants", async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
+    if (!user.workspaceId) return { data: [] };
 
     const participants = await prisma.participantProfile.findMany({
+      where: { workspaceId: user.workspaceId },
       orderBy: { displayName: "asc" }
     });
     return {

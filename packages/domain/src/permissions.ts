@@ -1,4 +1,4 @@
-import { type Actor, hasPermission, isAdminRole } from "./roles.js";
+import { type Actor, hasPermission } from "./roles.js";
 
 export function canViewParticipant(actor: Actor | null, targetProfileId: string) {
   if (!actor || !targetProfileId) return false;
@@ -45,9 +45,5 @@ export function canEditOwnEventStatus(actor: Actor | null) {
 
 export function canManageEvents(actor: Actor | null) {
   return hasPermission(actor, "event:edit:all") || hasPermission(actor, "event:manage:team");
-}
-
-export function canImportLegacyData(actor: Actor | null) {
-  return isAdminRole(actor?.role ?? "member") && hasPermission(actor, "import:legacy");
 }
 

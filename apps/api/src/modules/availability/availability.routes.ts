@@ -4,6 +4,7 @@ import { z } from "zod";
 import { forbidden } from "../../http/errors.js";
 import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
+import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
 
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -45,6 +46,9 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
     const query = querySchema.parse(request.query);
     const startDate = parseDateKey(query.start);
     const endDate = addDays(startDate, 6);
+    if (!actor.workspaceId) {
+      return { data: { startDate: query.start, endDate: toDateKey(endDate), cells: [] } };
+    }
     const profileIds = await resolveVisibleProfileIds(actor, query.profileId);
 
     if (profileIds.length === 0) {
@@ -104,6 +108,9 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
     const input = saveWeekSchema.parse(request.body);
     const profile = await prisma.participantProfile.findUnique({ where: { id: params.profileId } });
     if (!profile) return reply.code(404).send({ error: "not_found", message: "Participant profile not found" });
+    if (actor.workspaceId && profile.workspaceId !== actor.workspaceId) {
+      return forbidden(reply, "You cannot edit another workspace schedule");
+    }
 
     await prisma.$transaction(async (tx: typeof prisma) => {
       for (const cell of input.cells) {
@@ -155,6 +162,7 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
         }
       }
     });
+    await bumpWorkspaceRevision(profile.workspaceId, "availability", actor.id);
 
     return { data: { saved: input.cells.length } };
   });
@@ -166,7 +174,10 @@ async function resolveVisibleProfileIds(actor: NonNullable<Awaited<ReturnType<ty
   }
 
   if (actor.permissions.includes("schedule:view:all")) {
-    const profiles = await prisma.participantProfile.findMany({ select: { id: true } });
+    const profiles = await prisma.participantProfile.findMany({
+      where: actor.workspaceId ? { workspaceId: actor.workspaceId } : undefined,
+      select: { id: true }
+    });
     return profiles.map((profile: { id: string }) => profile.id);
   }
 

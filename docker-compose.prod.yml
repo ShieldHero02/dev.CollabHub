@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: collabhub-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - collabhub-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: collabhub-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      API_PORT: "4000"
+      API_HOST: "0.0.0.0"
+      NODE_ENV: production
+      CORS_ORIGIN: ""
+    command: sh -c "pnpm exec prisma db push && pnpm --filter @collabhub/api start"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: collabhub-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  collabhub-postgres:

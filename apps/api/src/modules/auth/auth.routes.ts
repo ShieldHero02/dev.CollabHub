@@ -5,6 +5,7 @@ import { createSession, publicUser, resolveAuthUserFromToken, setSessionCookie, 
 import { assignRoleByKey, ensureSystemAccess } from "./rbac.seed.js";
 import { unauthorized } from "../../http/errors.js";
 import { hashPassword, isLegacyPasswordHash, verifyPassword } from "./passwords.js";
+import { ensureDefaultWorkspace, linkUserToWorkspace } from "../workspaces/workspace.service.js";
 
 const credentialsSchema = z.object({
   login: z.string().trim().min(2).max(64),
@@ -29,6 +30,7 @@ export async function registerAuthRoutes(server: FastifyInstance) {
 
     const input = bootstrapSchema.parse(request.body);
     const passwordHash = await hashPassword(input.password);
+    const workspace = await ensureDefaultWorkspace();
     const user = await prisma.user.create({
       data: {
         login: input.login,
@@ -37,6 +39,7 @@ export async function registerAuthRoutes(server: FastifyInstance) {
         roleKey: "master",
         profile: {
           create: {
+            workspaceId: workspace.id,
             displayName: input.displayName ?? input.login,
             color: "#7b6cff"
           }
@@ -48,6 +51,7 @@ export async function registerAuthRoutes(server: FastifyInstance) {
       include: { profile: true }
     });
     await assignRoleByKey(user.id, "master");
+    await linkUserToWorkspace(user.id, "master", workspace.id);
     const session = await createSession(user.id);
     setSessionCookie(reply, session.token, session.expiresAt);
 

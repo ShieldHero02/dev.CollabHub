@@ -4,6 +4,7 @@ desktop.ini
 
 node_modules/
 dist/
+dist-types/
 build/
 .cache/
 .parcel-cache/
@@ -15,4 +16,3 @@ build/
 .env
 .env.*
 !.env.example
-

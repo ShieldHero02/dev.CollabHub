@@ -9,6 +9,7 @@ export type AuthUser = {
   email: string | null;
   role: Role;
   profileId: string | null;
+  workspaceId: string | null;
   permissions: Permission[];
 };
 
@@ -86,6 +87,10 @@ export async function resolveAuthUserFromToken(token: string): Promise<AuthUser 
       user: {
         include: {
           profile: true,
+          workspaceLinks: {
+            take: 1,
+            orderBy: { createdAt: "asc" }
+          },
           roleAssignments: {
             include: {
               role: {
@@ -116,6 +121,7 @@ export async function resolveAuthUserFromToken(token: string): Promise<AuthUser 
     email: session.user.email,
     role: session.user.roleKey as Role,
     profileId: session.user.profile?.id ?? null,
+    workspaceId: session.user.profile?.workspaceId ?? session.user.workspaceLinks[0]?.workspaceId ?? null,
     permissions: [...permissions]
   };
 }
@@ -128,6 +134,7 @@ export function publicUser(user: AuthUser | null) {
     email: user.email,
     role: user.role,
     profileId: user.profileId,
+    workspaceId: user.workspaceId,
     permissions: user.permissions
   };
 }

@@ -1,11 +1,14 @@
 import type { PropsWithChildren } from "react";
 import type { CurrentUserDto } from "@collabhub/shared-types";
 
-export type AppView = "overview" | "participants" | "member";
+export type AppView = "overview" | "participants" | "my-table" | "events" | "account";
 
 const navItems: Array<{ key: AppView; label: string }> = [
   { key: "overview", label: "Общее" },
-  { key: "participants", label: "Участники" }
+  { key: "participants", label: "Участники" },
+  { key: "my-table", label: "Моя таблица" },
+  { key: "events", label: "Ивенты" },
+  { key: "account", label: "Кабинет" }
 ];
 
 type AppShellProps = PropsWithChildren<{

@@ -60,8 +60,51 @@ model User {
   sessions          Session[]
   importJobs        ImportJob[]
   auditLogs         AuditLog[]
+  workspaceLinks    WorkspaceMember[]
 
   @@map("users")
+}
+
+model Workspace {
+  id          String               @id @default(cuid())
+  name        String
+  slug        String               @unique
+  description String?
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  members     WorkspaceMember[]
+  profiles    ParticipantProfile[]
+  teams       Team[]
+  events      Event[]
+  revisions   SyncRevision[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String   @map("workspace_id")
+  userId      String   @map("user_id")
+  roleKey     String   @default("member") @map("role_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model SyncRevision {
+  id          String    @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  version     Int
+  scope       String
+  actorUserId String?  @map("actor_user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, version])
+  @@map("sync_revisions")
 }
 
 model Session {
@@ -128,6 +171,7 @@ model RolePermission {
 model ParticipantProfile {
   id                   String                @id @default(cuid())
   userId               String                @unique @map("user_id")
+  workspaceId          String                @map("workspace_id")
   displayName          String                @map("display_name")
   color                String
   avatarUrl            String?               @map("avatar_url")
@@ -135,6 +179,7 @@ model ParticipantProfile {
   createdAt            DateTime              @default(now()) @map("created_at")
   updatedAt            DateTime              @updatedAt @map("updated_at")
   user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   availabilitySlots    AvailabilitySlot[]
   availabilityTemplates AvailabilityTemplateSlot[]
   availabilityComments AvailabilityComment[]
@@ -143,6 +188,7 @@ model ParticipantProfile {
   leadingTeams         Team[]                @relation("TeamLead")
   eventParticipants    EventParticipant[]
 
+  @@index([workspaceId])
   @@map("participant_profiles")
 }
 
@@ -163,15 +209,18 @@ model UserPreference {
 
 model Team {
   id            String              @id @default(cuid())
+  workspaceId   String              @map("workspace_id")
   name          String
   color         String
   leadProfileId String?             @map("lead_profile_id")
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
   lead          ParticipantProfile? @relation("TeamLead", fields: [leadProfileId], references: [id], onDelete: SetNull)
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members       TeamMember[]
   events        Event[]
 
+  @@index([workspaceId])
   @@map("teams")
 }
 
@@ -246,6 +295,7 @@ model AvailabilityPreset {
 
 model Event {
   id              String              @id @default(cuid())
+  workspaceId     String              @map("workspace_id")
   title           String
   activity        String?
   description     String?
@@ -258,10 +308,12 @@ model Event {
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
   createdBy       User                @relation("CreatedEvents", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   team            Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
   participants    EventParticipant[]
 
   @@index([date, startHour])
+  @@index([workspaceId])
   @@map("events")
 }
 

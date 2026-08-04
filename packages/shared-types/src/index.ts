@@ -14,6 +14,7 @@ export type CurrentUserDto = {
   email: string | null;
   role: string;
   profileId: string | null;
+  workspaceId: string | null;
   permissions: string[];
 };
 
@@ -62,6 +63,42 @@ export type SaveAvailabilityWeekDto = {
   }>;
 };
 
+export type EventParticipantStatusDto = "going" | "maybe" | "no" | "invited";
+
+export type EventDto = {
+  id: string;
+  title: string;
+  activity: string | null;
+  description: string | null;
+  date: string;
+  startHour: number;
+  endHour: number;
+  createdByUserId: string;
+  canEdit: boolean;
+  participants: Array<{
+    profileId: string;
+    displayName: string;
+    color: string;
+    status: EventParticipantStatusDto;
+  }>;
+};
+
+export type CreateEventDto = {
+  title: string;
+  activity?: string;
+  description?: string;
+  date: string;
+  startHour: number;
+  endHour: number;
+  participantIds?: string[];
+};
+
+export type SyncSnapshotDto = {
+  revision: number;
+  participants: ParticipantDto[];
+  events: EventDto[];
+};
+
 export type UserDto = {
   id: string;
   login: string;
@@ -79,23 +116,5 @@ export type RoleDto = {
   description: string | null;
   isSystem: boolean;
   permissions: string[];
-};
-
-export type LegacyImportPreviewDto = {
-  participants: number;
-  accounts: number;
-  teams: number;
-  templateSlots: number;
-  datedSlots: number;
-  comments: number;
-  presets: number;
-  events: number;
-  eventParticipants: number;
-  warnings: string[];
-};
-
-export type LegacyImportResultDto = {
-  jobId: string;
-  summary: LegacyImportPreviewDto;
 };
 

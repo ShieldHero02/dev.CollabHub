@@ -43,7 +43,6 @@ export const permissions = [
   "team:manage",
   "user:manage",
   "role:manage",
-  "import:legacy",
   "system:manage"
 ] as const;
 
@@ -63,8 +62,7 @@ export const defaultRolePermissions: Record<Role, Permission[]> = {
     "event:delete:all",
     "team:view",
     "team:manage",
-    "user:manage",
-    "import:legacy"
+    "user:manage"
   ],
   manager: [
     "dashboard:view",
