@@ -1,13 +1,14 @@
 import type { PropsWithChildren } from "react";
 import type { CurrentUserDto } from "@collabhub/shared-types";
 
-export type AppView = "overview" | "participants" | "my-table" | "events" | "account";
+export type AppView = "overview" | "participants" | "my-table" | "events" | "management" | "account";
 
 const navItems: Array<{ key: AppView; label: string }> = [
   { key: "overview", label: "Общее" },
   { key: "participants", label: "Участники" },
   { key: "my-table", label: "Моя таблица" },
   { key: "events", label: "Ивенты" },
+  { key: "management", label: "Управление" },
   { key: "account", label: "Кабинет" }
 ];
 
@@ -30,7 +31,7 @@ export function AppShell({ activeView, children, currentUser, onLogout, onNaviga
           </span>
         </button>
         <nav className="main-nav" aria-label="Основная навигация">
-          {navItems.map((item) => (
+          {navItems.filter((item) => item.key !== "management" || currentUser?.permissions.includes("user:manage")).map((item) => (
             <button
               className={activeView === item.key ? "active" : ""}
               key={item.key}

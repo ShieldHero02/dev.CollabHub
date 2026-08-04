@@ -11,6 +11,7 @@ import { registerRoleRoutes } from "./modules/roles/roles.routes.js";
 import { registerSyncRoutes } from "./modules/sync/sync.routes.js";
 import { registerMeRoutes } from "./modules/users/me.routes.js";
 import { registerUserRoutes } from "./modules/users/users.routes.js";
+import { registerOAuthRoutes } from "./modules/oauth/oauth.routes.js";
 
 export async function buildServer() {
   const server = Fastify({
@@ -41,6 +42,7 @@ export async function buildServer() {
 
   await registerHealthRoutes(server);
   await registerAuthRoutes(server);
+  await registerOAuthRoutes(server);
   await registerMeRoutes(server);
   await registerAccountRoutes(server);
   await registerUserRoutes(server);

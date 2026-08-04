@@ -23,6 +23,13 @@ export type AuthResponseDto = {
   user: CurrentUserDto | null;
 };
 
+export type OAuthProviderDto = "twitch" | "youtube";
+
+export type OAuthResultDto = {
+  result: "linked" | "authenticated";
+  provider: OAuthProviderDto;
+};
+
 export type ParticipantDto = {
   id: string;
   displayName: string;

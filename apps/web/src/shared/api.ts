@@ -32,6 +32,28 @@ export type AccountDto = {
   } | null;
 };
 
+export type ManagedUserDto = {
+  id: string;
+  login: string;
+  email: string | null;
+  role: string;
+  status: string;
+  profile: ParticipantDto | null;
+  roles: string[];
+};
+
+export type CreateManagedUserDto = {
+  login: string;
+  password: string;
+  displayName: string;
+  role: string;
+};
+
+export type OAuthProviderStatusDto = {
+  provider: "twitch" | "youtube";
+  enabled: boolean;
+};
+
 const defaultApiBase = "/api";
 
 export const apiBaseUrl =
@@ -42,6 +64,11 @@ export class ApiClient {
 
   async setupStatus() {
     return this.request<SetupStatusDto>("/auth/setup-status");
+  }
+
+  async oauthProviders() {
+    const response = await this.request<ApiEnvelope<OAuthProviderStatusDto[]>>("/oauth/providers");
+    return response.data;
   }
 
   async bootstrap(payload: { login: string; password: string; displayName: string }) {
@@ -89,6 +116,19 @@ export class ApiClient {
 
   async participants() {
     const response = await this.request<ApiEnvelope<ParticipantDto[]>>("/participants");
+    return response.data;
+  }
+
+  async users() {
+    const response = await this.request<ApiEnvelope<ManagedUserDto[]>>("/users");
+    return response.data;
+  }
+
+  async createUser(payload: CreateManagedUserDto) {
+    const response = await this.request<ApiEnvelope<{ id: string; login: string; role: string; profileId: string | null }>>("/users", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
     return response.data;
   }
 

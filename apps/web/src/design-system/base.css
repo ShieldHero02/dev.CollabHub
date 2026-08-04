@@ -466,6 +466,127 @@ button {
   background: color-mix(in srgb, var(--color-busy), transparent 80%);
 }
 
+.notice.success {
+  border-color: color-mix(in srgb, var(--color-free-strong), white 12%);
+  background: color-mix(in srgb, var(--color-free-strong), transparent 84%);
+}
+
+.management-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.management-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.management-form h2,
+.management-form p,
+.credential-card p {
+  margin: 0;
+}
+
+.management-form label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-muted);
+}
+
+.management-form input,
+.management-form select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #07101a;
+  color: var(--color-text);
+  padding: 0 var(--space-3);
+}
+
+.managed-user-list {
+  display: grid;
+}
+
+.managed-user-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.managed-user-row:last-child {
+  border-bottom: 0;
+}
+
+.managed-user-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.managed-user-row small {
+  color: var(--color-muted);
+}
+
+.role-badge,
+.status-badge {
+  padding: var(--space-1) var(--space-2);
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.status-badge.active {
+  color: var(--color-free-strong);
+}
+
+.credential-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent), transparent 88%);
+}
+
+.credential-card code {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: #07101a;
+  font-size: 16px;
+  user-select: all;
+}
+
+.oauth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.oauth-actions > span {
+  width: 100%;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.oauth-link-section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.oauth-link-section h2,
+.oauth-link-section p {
+  margin: 0;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -527,5 +648,20 @@ button {
   .cell-panel {
     border-left: 0;
     border-top: 1px solid var(--color-border);
+  }
+
+  .management-layout,
+  .credential-card {
+    grid-template-columns: 1fr;
+  }
+
+  .managed-user-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .role-badge,
+  .status-badge {
+    grid-column: 2;
+    justify-self: start;
   }
 }

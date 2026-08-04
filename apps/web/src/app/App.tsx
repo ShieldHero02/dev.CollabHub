@@ -8,7 +8,7 @@ import type {
   ParticipantDto
 } from "@collabhub/shared-types";
 import { AppShell, type AppView } from "../shared/AppShell.js";
-import { AccountDto, ApiClient, apiBaseUrl } from "../shared/api.js";
+import { AccountDto, ApiClient, apiBaseUrl, type ManagedUserDto, type OAuthProviderStatusDto } from "../shared/api.js";
 
 const tokenStorageKey = "collabhub.v2.token";
 const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -34,6 +34,7 @@ export function App() {
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [isBooting, setIsBooting] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [oauthNotice, setOauthNotice] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const api = useMemo(() => new ApiClient(token), [token]);
 
@@ -64,6 +65,18 @@ export function App() {
       setEvents([]);
     }
   }, [api, loadSnapshot]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("oauth");
+    if (result === "authenticated" || result === "linked") {
+      const provider = oauthProviderLabel(url.searchParams.get("provider"));
+      setOauthNotice(result === "authenticated" ? `Вход через ${provider} выполнен.` : `${provider} успешно привязан к аккаунту.`);
+      url.searchParams.delete("oauth");
+      url.searchParams.delete("provider");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     void loadSession()
@@ -116,11 +129,12 @@ export function App() {
   }
 
   if (isBooting) return <SplashScreen />;
-  if (!currentUser) return <AuthScreen error={error} mode={needsBootstrap ? "bootstrap" : "login"} onSubmit={handleAuth} />;
+  if (!currentUser) return <AuthScreen api={api} error={error} mode={needsBootstrap ? "bootstrap" : "login"} notice={oauthNotice} onSubmit={handleAuth} />;
 
   return (
     <AppShell activeView={activeView} currentUser={currentUser} onLogout={handleLogout} onNavigate={handleNavigate}>
       {error ? <div className="notice danger">{error}</div> : null}
+      {oauthNotice ? <div className="notice success" role="status">{oauthNotice}</div> : null}
       {activeView === "overview" ? (
         <OverviewScreen
           api={api}
@@ -146,6 +160,7 @@ export function App() {
         <ParticipantTableScreen api={api} currentUser={currentUser} events={events} participant={selectedParticipant} onSaved={loadSnapshot} />
       ) : null}
       {activeView === "events" ? <EventsScreen api={api} events={events} participants={participants} onChanged={loadSnapshot} /> : null}
+      {activeView === "management" && currentUser.permissions.includes("user:manage") ? <ManagementScreen api={api} currentUser={currentUser} onChanged={loadSnapshot} /> : null}
       {activeView === "account" ? <AccountScreen api={api} onChanged={loadSnapshot} /> : null}
     </AppShell>
   );
@@ -164,12 +179,16 @@ function SplashScreen() {
 }
 
 function AuthScreen({
+  api,
   error,
   mode,
+  notice,
   onSubmit
 }: {
+  api: ApiClient;
   error: string | null;
   mode: "bootstrap" | "login";
+  notice: string | null;
   onSubmit: (payload: { login: string; password: string; displayName?: string }) => Promise<void>;
 }) {
   const [login, setLogin] = useState("");
@@ -177,6 +196,11 @@ function AuthScreen({
   const [displayName, setDisplayName] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [oauthProviders, setOauthProviders] = useState<OAuthProviderStatusDto[]>([]);
+
+  useEffect(() => {
+    void api.oauthProviders().then(setOauthProviders).catch(() => undefined);
+  }, [api]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -223,9 +247,11 @@ function AuthScreen({
           />
         </label>
         {error || localError ? <div className="notice danger">{localError ?? error}</div> : null}
+        {notice ? <div className="notice success" role="status">{notice}</div> : null}
         <button className="primary-button" disabled={isSubmitting} type="submit">
           {isSubmitting ? "Проверяем..." : mode === "bootstrap" ? "Создать" : "Войти"}
         </button>
+        {mode === "login" ? <OAuthActions mode="login" providers={oauthProviders} /> : null}
       </form>
     </main>
   );
@@ -498,9 +524,11 @@ function AccountScreen({ api, onChanged }: { api: ApiClient; onChanged: () => Pr
   const [account, setAccount] = useState<AccountDto | null>(null);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oauthProviders, setOauthProviders] = useState<OAuthProviderStatusDto[]>([]);
 
   useEffect(() => {
     void api.account().then(setAccount).catch((err) => setError(readError(err)));
+    void api.oauthProviders().then(setOauthProviders).catch(() => undefined);
   }, [api]);
 
   if (!account?.profile) return <div className="empty-state">Профиль загружается...</div>;
@@ -540,8 +568,138 @@ function AccountScreen({ api, onChanged }: { api: ApiClient; onChanged: () => Pr
         <label>Цвет<input type="color" value={account.profile.color} onChange={(event) => { setDirty(true); setAccount({ ...account, profile: { ...account.profile!, color: event.target.value } }); }} /></label>
         <label>Интересы<input value={account.profile.interests.join(", ")} onChange={(event) => { setDirty(true); setAccount({ ...account, profile: { ...account.profile!, interests: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) } }); }} /></label>
       </section>
+      {oauthProviders.some((item) => item.enabled) ? (
+        <section className="surface form-surface oauth-link-section">
+          <div><h2>Подключённые сервисы</h2><p>Привяжите стриминговый аккаунт, чтобы использовать его для следующего входа.</p></div>
+          <OAuthActions mode="link" providers={oauthProviders} />
+        </section>
+      ) : null}
     </>
   );
+}
+
+function OAuthActions({ mode, providers }: { mode: "login" | "link"; providers: OAuthProviderStatusDto[] }) {
+  const enabled = providers.filter((item) => item.enabled);
+  if (!enabled.length) return null;
+  return (
+    <div className="oauth-actions">
+      <span>{mode === "login" ? "Или продолжить через" : "Доступные подключения"}</span>
+      {enabled.map(({ provider }) => (
+        <button className="secondary-button" key={provider} onClick={() => window.location.assign(`${apiBaseUrl}/oauth/${provider}/start?mode=${mode}`)} type="button">
+          {mode === "login" ? "Войти" : "Привязать"} через {oauthProviderLabel(provider)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function oauthProviderLabel(provider: string | null) {
+  if (provider === "twitch") return "Twitch";
+  if (provider === "youtube") return "YouTube";
+  return "внешний сервис";
+}
+
+const manageableRoles = ["manager", "teamlead", "member", "viewer"] as const;
+const masterManageableRoles = ["head_admin", "admin", ...manageableRoles] as const;
+const roleLabels: Record<string, string> = {
+  master: "Владелец",
+  head_admin: "Главный администратор",
+  admin: "Администратор",
+  manager: "Организатор",
+  teamlead: "Тимлид",
+  member: "Участник",
+  viewer: "Наблюдатель"
+};
+
+function ManagementScreen({ api, currentUser, onChanged }: { api: ApiClient; currentUser: CurrentUserDto; onChanged: () => Promise<void> }) {
+  const [users, setUsers] = useState<ManagedUserDto[]>([]);
+  const [login, setLogin] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [role, setRole] = useState("member");
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const loadUsers = useCallback(async () => {
+    setError(null);
+    try {
+      setUsers(await api.users());
+    } catch (unknownError) {
+      setError(readError(unknownError));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
+  async function createUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    setGeneratedPassword(null);
+    setIsCreating(true);
+    const password = generatePassword();
+    try {
+      const created = await api.createUser({ login: login.trim(), displayName: displayName.trim(), role, password });
+      setGeneratedPassword(password);
+      setNotice(`Участник ${created.login} добавлен. Передайте ему временный пароль сейчас.`);
+      setLogin("");
+      setDisplayName("");
+      setRole("member");
+      await Promise.all([loadUsers(), onChanged()]);
+    } catch (unknownError) {
+      setError(readError(unknownError));
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  const roles = currentUser.role === "master" ? masterManageableRoles : manageableRoles;
+
+  return (
+    <>
+      <header className="page-head">
+        <div><h1>Управление участниками</h1><p>Добавляйте людей в сообщество и выдавайте им подходящую стартовую роль.</p></div>
+      </header>
+      {error ? <div className="notice danger" role="alert">{error}</div> : null}
+      {notice ? <div className="notice success" role="status">{notice}</div> : null}
+      {generatedPassword ? (
+        <section className="credential-card" aria-label="Временный пароль">
+          <div><b>Временный пароль</b><p>Он показывается только сейчас. Скопируйте и передайте его участнику безопасным способом.</p></div>
+          <code>{generatedPassword}</code>
+          <button className="secondary-button" onClick={() => void navigator.clipboard.writeText(generatedPassword)} type="button">Копировать</button>
+          <button className="ghost-button" onClick={() => setGeneratedPassword(null)} type="button">Я сохранил пароль</button>
+        </section>
+      ) : null}
+      <section className="management-layout">
+        <form className="surface form-surface management-form" onSubmit={createUser}>
+          <div><h2>Новый участник</h2><p>Пароль будет создан автоматически после добавления.</p></div>
+          <label>Логин<input autoComplete="off" minLength={2} maxLength={64} required value={login} onChange={(event) => setLogin(event.target.value)} /></label>
+          <label>Отображаемое имя<input minLength={2} maxLength={80} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
+          <label>Роль<select value={role} onChange={(event) => setRole(event.target.value)}>{roles.map((item) => <option key={item} value={item}>{roleLabels[item] ?? item}</option>)}</select></label>
+          <button className="primary-button" disabled={isCreating} type="submit">{isCreating ? "Добавляем..." : "Добавить участника"}</button>
+        </form>
+        <section className="surface managed-users">
+          <header className="surface-head"><div><h2>Люди сообщества</h2><p>{isLoading ? "Загружаем список..." : `${users.length} аккаунтов`}</p></div><button className="ghost-button" disabled={isLoading} onClick={() => { setIsLoading(true); void loadUsers(); }} type="button">Обновить</button></header>
+          {!isLoading && !users.length ? <div className="empty-state">Пока нет участников.</div> : null}
+          <div className="managed-user-list">
+            {users.map((user) => <article className="managed-user-row" key={user.id}><span className="avatar-dot" style={{ background: user.profile?.color ?? "var(--color-unknown)" }} /><div><b>{user.profile?.displayName ?? user.login}</b><small>@{user.login}</small></div><span className="role-badge">{roleLabels[user.role] ?? user.role}</span><span className={`status-badge ${user.status}`}>{user.status === "active" ? "Активен" : user.status}</span></article>)}
+          </div>
+        </section>
+      </section>
+    </>
+  );
+}
+
+function generatePassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const values = crypto.getRandomValues(new Uint32Array(16));
+  return Array.from(values, (value) => alphabet[value % alphabet.length]).join("");
 }
 
 function CellDetailsPanel({ canEdit, cell, events, onChange }: { canEdit: boolean; cell: AvailabilityCellDto | null; events: EventDto[]; onChange: (cell: AvailabilityCellDto) => void }) {
