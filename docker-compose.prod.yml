@@ -26,7 +26,7 @@ services:
       API_HOST: "0.0.0.0"
       NODE_ENV: production
       CORS_ORIGIN: ""
-    command: sh -c "pnpm exec prisma db push && pnpm --filter @collabhub/api start"
+    command: sh -c "pnpm exec prisma db push --skip-generate && pnpm --filter @collabhub/api start"
     depends_on:
       postgres:
         condition: service_healthy
