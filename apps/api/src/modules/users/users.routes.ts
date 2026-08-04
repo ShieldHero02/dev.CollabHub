@@ -98,7 +98,7 @@ export async function registerUserRoutes(server: FastifyInstance) {
     const created = await prisma.user.create({
       data: {
         login: input.login,
-        email: input.email,
+        email: input.email ?? null,
         passwordHash,
         roleKey: input.role,
         profile: {

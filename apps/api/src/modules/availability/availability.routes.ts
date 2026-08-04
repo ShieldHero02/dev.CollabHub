@@ -6,6 +6,8 @@ import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
 import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
 
+type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
+
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const querySchema = z.object({
@@ -119,7 +121,7 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
 
     const input = saveWeekSchema.parse(request.body);
 
-    await prisma.$transaction(async (tx: typeof prisma) => {
+    await prisma.$transaction(async (tx: PrismaTx) => {
       for (const cell of input.cells) {
         if (!isValidHour(cell.hour)) continue;
         const date = parseDateKey(cell.date);
@@ -189,8 +191,9 @@ async function resolveVisibleProfileIds(actor: NonNullable<Awaited<ReturnType<ty
   }
 
   if (actor.permissions.includes("schedule:view:all")) {
+    if (!actor.workspaceId) return [];
     const profiles = await prisma.participantProfile.findMany({
-      where: actor.workspaceId ? { workspaceId: actor.workspaceId } : undefined,
+      where: { workspaceId: actor.workspaceId },
       select: { id: true }
     });
     return profiles.map((profile: { id: string }) => profile.id);

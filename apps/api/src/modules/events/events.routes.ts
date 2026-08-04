@@ -13,6 +13,8 @@ import { requireUser } from "../../http/auth.js";
 import { prisma } from "../../plugins/prisma.js";
 import { bumpWorkspaceRevision } from "../workspaces/workspace.service.js";
 
+type PrismaTx = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$extends">;
+
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const eventInputSchema = z.object({
@@ -39,13 +41,14 @@ export async function registerEventRoutes(server: FastifyInstance) {
     if (!canViewEvents(actor) || !actor.workspaceId) return { data: [] };
 
     const query = eventQuerySchema.parse(request.query);
+    const dateFilter = {
+      ...(query.start ? { gte: parseDateKey(query.start) } : {}),
+      ...(query.end ? { lte: parseDateKey(query.end) } : {})
+    };
     const events = await prisma.event.findMany({
       where: {
         workspaceId: actor.workspaceId,
-        date: {
-          gte: query.start ? parseDateKey(query.start) : undefined,
-          lte: query.end ? parseDateKey(query.end) : undefined
-        }
+        ...(Object.keys(dateFilter).length ? { date: dateFilter } : {})
       },
       orderBy: [{ date: "asc" }, { startHour: "asc" }],
       include: {
@@ -108,7 +111,7 @@ export async function registerEventRoutes(server: FastifyInstance) {
     if (!(await participantIdsBelongToWorkspace(input.participantIds, actor.workspaceId))) {
       return forbidden(reply, "Event participants must belong to your workspace");
     }
-    const event = await prisma.$transaction(async (tx: typeof prisma) => {
+    const event = await prisma.$transaction(async (tx: PrismaTx) => {
       await tx.eventParticipant.deleteMany({ where: { eventId: existing.id } });
       return tx.event.update({
         where: { id: existing.id },

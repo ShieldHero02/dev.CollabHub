@@ -1,4 +1,4 @@
-import { defaultRolePermissions, permissions, systemRoles, type Role } from "@collabhub/domain";
+import { defaultRolePermissions, permissions, systemRoles, type Permission, type Role } from "@collabhub/domain";
 import { prisma } from "../../plugins/prisma.js";
 
 export async function ensureSystemAccess() {
@@ -29,7 +29,7 @@ export async function ensureSystemAccess() {
       }
     });
 
-    for (const permission of defaultRolePermissions[key]) {
+    for (const permission of defaultRolePermissions[key] as Permission[]) {
       const permissionId = permissionByKey.get(permission);
       if (!permissionId) continue;
       await prisma.rolePermission.upsert({

@@ -59,7 +59,7 @@ export async function bumpWorkspaceRevision(workspaceId: string, scope: string, 
       workspaceId,
       version,
       scope,
-      actorUserId
+      actorUserId: actorUserId ?? null
     }
   });
   return version;
