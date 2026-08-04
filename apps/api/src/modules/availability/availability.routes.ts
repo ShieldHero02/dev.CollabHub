@@ -101,16 +101,23 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
     if (!actor) return reply;
 
     const params = z.object({ profileId: z.string() }).parse(request.params);
+    if (!actor.workspaceId) {
+      return forbidden(reply, "You cannot edit a participant schedule without a workspace");
+    }
+    const profile = await prisma.participantProfile.findFirst({
+      where: {
+        id: params.profileId,
+        workspaceId: actor.workspaceId
+      }
+    });
+    if (!profile) {
+      return forbidden(reply, "You cannot edit another workspace schedule");
+    }
     if (!canEditParticipant(actor, params.profileId)) {
       return forbidden(reply, "You cannot edit this participant schedule");
     }
 
     const input = saveWeekSchema.parse(request.body);
-    const profile = await prisma.participantProfile.findUnique({ where: { id: params.profileId } });
-    if (!profile) return reply.code(404).send({ error: "not_found", message: "Participant profile not found" });
-    if (actor.workspaceId && profile.workspaceId !== actor.workspaceId) {
-      return forbidden(reply, "You cannot edit another workspace schedule");
-    }
 
     await prisma.$transaction(async (tx: typeof prisma) => {
       for (const cell of input.cells) {
@@ -170,7 +177,15 @@ export async function registerAvailabilityRoutes(server: FastifyInstance) {
 
 async function resolveVisibleProfileIds(actor: NonNullable<Awaited<ReturnType<typeof requireUser>>>, requestedProfileId?: string) {
   if (requestedProfileId) {
-    return canViewParticipant(actor, requestedProfileId) ? [requestedProfileId] : [];
+    if (!actor.workspaceId || !canViewParticipant(actor, requestedProfileId)) return [];
+    const profile = await prisma.participantProfile.findFirst({
+      where: {
+        id: requestedProfileId,
+        workspaceId: actor.workspaceId
+      },
+      select: { id: true }
+    });
+    return profile ? [profile.id] : [];
   }
 
   if (actor.permissions.includes("schedule:view:all")) {

@@ -66,6 +66,9 @@ export async function registerEventRoutes(server: FastifyInstance) {
     if (!canCreateEvent(actor) || !actor.workspaceId) return forbidden(reply);
 
     const input = eventInputSchema.parse(request.body);
+    if (!(await participantIdsBelongToWorkspace(input.participantIds, actor.workspaceId))) {
+      return forbidden(reply, "Event participants must belong to your workspace");
+    }
     const event = await prisma.event.create({
       data: {
         workspaceId: actor.workspaceId,
@@ -102,6 +105,9 @@ export async function registerEventRoutes(server: FastifyInstance) {
     }
 
     const input = eventInputSchema.parse(request.body);
+    if (!(await participantIdsBelongToWorkspace(input.participantIds, actor.workspaceId))) {
+      return forbidden(reply, "Event participants must belong to your workspace");
+    }
     const event = await prisma.$transaction(async (tx: typeof prisma) => {
       await tx.eventParticipant.deleteMany({ where: { eventId: existing.id } });
       return tx.event.update({
@@ -170,6 +176,19 @@ export async function registerEventRoutes(server: FastifyInstance) {
     await bumpWorkspaceRevision(actor.workspaceId, "events", actor.id);
     return { data: { ok: true } };
   });
+}
+
+async function participantIdsBelongToWorkspace(participantIds: string[], workspaceId: string) {
+  const uniqueParticipantIds = [...new Set(participantIds)];
+  if (uniqueParticipantIds.length === 0) return true;
+
+  const matchingProfiles = await prisma.participantProfile.count({
+    where: {
+      id: { in: uniqueParticipantIds },
+      workspaceId
+    }
+  });
+  return matchingProfiles === uniqueParticipantIds.length;
 }
 
 function eventDto(event: any, actorUserId: string, actor: any) {

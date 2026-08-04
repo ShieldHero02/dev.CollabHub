@@ -108,11 +108,18 @@ export function App() {
     setActiveView("overview");
   }
 
+  function handleNavigate(view: AppView) {
+    if (view === "my-table" && currentUser?.profileId) {
+      setSelectedParticipantId(currentUser.profileId);
+    }
+    setActiveView(view);
+  }
+
   if (isBooting) return <SplashScreen />;
   if (!currentUser) return <AuthScreen error={error} mode={needsBootstrap ? "bootstrap" : "login"} onSubmit={handleAuth} />;
 
   return (
-    <AppShell activeView={activeView} currentUser={currentUser} onLogout={handleLogout} onNavigate={setActiveView}>
+    <AppShell activeView={activeView} currentUser={currentUser} onLogout={handleLogout} onNavigate={handleNavigate}>
       {error ? <div className="notice danger">{error}</div> : null}
       {activeView === "overview" ? (
         <OverviewScreen
